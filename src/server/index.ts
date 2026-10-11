@@ -95,12 +95,14 @@ import { SshTerminalProxy } from './terminal/SshTerminalProxy'
 import { normalizeCapturedHistory } from './terminal/tmuxText'
 import {
   buildTmuxFormat,
+  escapeTmuxFormatArg,
   splitTmuxFields,
   splitTmuxLines,
   withTmuxUtf8Flag,
 } from './tmuxFormat'
 import { timedSpawnAsync, timedSpawnSync } from './syncSpawnTiming'
 import { getTailscaleIp } from './tailscale'
+import { windowNameError } from './windowName'
 
 function checkPortAvailable(port: number): void {
   let result: ReturnType<typeof Bun.spawnSync>
@@ -3115,9 +3117,12 @@ async function handleRemoteCreate(
 
   // Validate name format if provided (same rules as rename)
   const windowName = name?.trim() || generateSessionName()
-  if (name?.trim() && !/^[\w-]+$/.test(windowName)) {
-    send(ws, { type: 'error', message: 'Name can only contain letters, numbers, hyphens, and underscores' })
-    return
+  if (name?.trim()) {
+    const nameError = windowNameError(windowName)
+    if (nameError) {
+      send(ws, { type: 'error', message: nameError })
+      return
+    }
   }
 
   try {
@@ -3153,7 +3158,7 @@ async function handleRemoteCreate(
         'new-window', '-P',
         ...noFlickerEnv,
         '-F', buildTmuxFormat(['#{window_index}', '#{window_id}']),
-        '-t', tmuxSession, '-n', windowName, '-c', trimmedPath, wrappedCommand,
+        '-t', tmuxSession, '-n', escapeTmuxFormatArg(windowName), '-c', trimmedPath, wrappedCommand,
       ])
     } else {
       // Session doesn't exist — create it with the desired window directly
@@ -3162,7 +3167,7 @@ async function handleRemoteCreate(
         'new-session', '-d', '-P',
         ...noFlickerEnv,
         '-F', buildTmuxFormat(['#{window_index}', '#{window_id}']),
-        '-s', tmuxSession, '-n', windowName, '-c', trimmedPath, wrappedCommand,
+        '-s', tmuxSession, '-n', escapeTmuxFormatArg(windowName), '-c', trimmedPath, wrappedCommand,
       ])
     }
     if (createResult.exitCode !== 0) {
@@ -3561,15 +3566,9 @@ async function handleRename(
       const record = db.getSessionById(sessionId)
       if (record && !record.currentWindow) {
         const trimmed = newName.trim()
-        if (!trimmed) {
-          send(ws, { type: 'error', message: 'Name cannot be empty' })
-          return
-        }
-        if (!/^[\w-]+$/.test(trimmed)) {
-          send(ws, {
-            type: 'error',
-            message: 'Name can only contain letters, numbers, hyphens, and underscores',
-          })
+        const nameError = windowNameError(trimmed)
+        if (nameError) {
+          send(ws, { type: 'error', message: nameError })
           return
         }
         if (db.displayNameExists(trimmed, sessionId)) {
@@ -3598,16 +3597,20 @@ async function handleRename(
       return
     }
     const trimmed = newName.trim()
-    if (!trimmed) {
-      send(ws, { type: 'error', message: 'Name cannot be empty' })
-      return
-    }
-    if (!/^[\w-]+$/.test(trimmed)) {
-      send(ws, { type: 'error', message: 'Name can only contain letters, numbers, hyphens, and underscores' })
+    const nameError = windowNameError(trimmed)
+    if (nameError) {
+      send(ws, { type: 'error', message: nameError })
       return
     }
     try {
-      const result = await runRemoteTmux(session.host, ['rename-window', '-t', session.tmuxWindow, trimmed])
+      // `--` stops a leading '-' in the name from being parsed as a flag
+      const result = await runRemoteTmux(session.host, [
+        'rename-window',
+        '-t',
+        session.tmuxWindow,
+        ...(trimmed.startsWith('-') ? ['--'] : []),
+        escapeTmuxFormatArg(trimmed),
+      ])
       if (result.exitCode !== 0) {
         const stderr = result.stderr?.trim() ?? 'Unknown error'
         send(ws, { type: 'error', message: stderr })

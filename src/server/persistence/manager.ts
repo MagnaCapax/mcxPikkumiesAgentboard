@@ -17,6 +17,7 @@ import {
 } from './tmuxIdentity'
 import { config } from '../config'
 import { logger } from '../logger'
+import { windowNameError } from '../windowName'
 
 export class PersistentSessions {
   readonly catalog: SessionCatalog
@@ -209,8 +210,14 @@ export class PersistentSessions {
         this.manager.renameWindow(live.tmuxWindow, saved.name)
       } catch {
         // tmux refused (e.g. a name collision) — follow reality instead of
-        // throwing on every refresh.
-        this.catalog.rename(saved.id, live.name)
+        // throwing on every refresh. The live name itself may not satisfy
+        // catalog validation (e.g. renamed to >120 chars outside agentboard);
+        // keep the stale record rather than failing the observe loop.
+        try {
+          this.catalog.rename(saved.id, live.name)
+        } catch {
+          /* un-storable external name */
+        }
       }
     }
     if (
@@ -244,13 +251,19 @@ export class PersistentSessions {
       if (record)
         saved = importConversation(this.catalog, record, this.isManagedWindow)
     }
-    if (!saved)
+    if (!saved) {
+      const requested = name?.trim()
+      if (requested) {
+        const nameError = windowNameError(requested)
+        if (nameError) throw new RequestError(nameError)
+      }
       saved = this.catalog.create({
-        name: name?.trim().replace(/\s+/g, '-') || generateSessionName(),
+        name: requested || generateSessionName(),
         projectPath,
         command: command || 'claude',
         agentType: inferAgentType(command || 'claude') ?? null,
       })
+    }
     const run = this.catalog.beginRun(saved.id, options.operationId)
     if (run.reused) {
       const current = this.catalog.get(saved.id)!

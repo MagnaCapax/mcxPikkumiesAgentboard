@@ -17,10 +17,12 @@ import {
   BOOTSTRAP_WINDOW_COMMAND,
   BOOTSTRAP_WINDOW_NAME,
   buildTmuxFormat,
+  escapeTmuxFormatArg,
   splitTmuxFields,
   splitTmuxLines,
   withTmuxUtf8Flag,
 } from './tmuxFormat'
+import { MAX_WINDOW_NAME_LENGTH, windowNameError } from './windowName'
 import {
   inferCachedSessionStatus,
   detectsPermissionPrompt,
@@ -702,7 +704,10 @@ export class SessionManager {
 
     let baseName = name?.trim()
     if (baseName) {
-      baseName = baseName.replace(/\s+/g, '-')
+      const nameError = windowNameError(baseName)
+      if (nameError) {
+        throw new Error(nameError)
+      }
     } else {
       // Generate random name, retry if collision with tmux windows or DB
       do {
@@ -731,7 +736,9 @@ export class SessionManager {
     const identityCommands = (target: string): string[] => options?.runId && options.boardSessionId ? [
       ';', 'set-option', '-w', '-t', target, '@agentboard-run-id', options.runId,
       ';', 'set-option', '-w', '-t', target, '@agentboard-session-id', options.boardSessionId,
-      ';', 'rename-window', '-t', target, finalName,
+      ';', 'rename-window', '-t', target,
+      ...(finalName.startsWith('-') ? ['--'] : []),
+      escapeTmuxFormatArg(finalName),
     ] : []
 
     if (!sessionExisted) {
@@ -742,7 +749,7 @@ export class SessionManager {
         ...terminalColorEnv,
         ...identityEnv,
         '-s', this.sessionName,
-        '-n', launchName,
+        '-n', escapeTmuxFormatArg(launchName),
         '-c', resolvedPath,
         finalCommand,
         ...identityCommands(`${this.sessionName}:`),
@@ -756,7 +763,7 @@ export class SessionManager {
         ...terminalColorEnv,
         ...identityEnv,
         '-t', `${this.sessionName}:${nextIndex}`,
-        '-n', launchName,
+        '-n', escapeTmuxFormatArg(launchName),
         '-c', resolvedPath,
         finalCommand,
         ...identityCommands(`${this.sessionName}:${nextIndex}`),
@@ -917,15 +924,9 @@ export class SessionManager {
 
   renameWindow(tmuxWindow: string, newName: string): void {
     const trimmed = newName.trim()
-    if (!trimmed) {
-      throw new Error('Name cannot be empty')
-    }
-
-    // Validate: alphanumeric, hyphens, underscores only
-    if (!/^[\w-]+$/.test(trimmed)) {
-      throw new Error(
-        'Name can only contain letters, numbers, hyphens, and underscores'
-      )
+    const nameError = windowNameError(trimmed)
+    if (nameError) {
+      throw new Error(nameError)
     }
     this.assertNotReservedWindowName(trimmed)
 
@@ -941,7 +942,14 @@ export class SessionManager {
       throw new Error(`A session named "${trimmed}" already exists`)
     }
 
-    this.runTmux(['rename-window', '-t', tmuxWindow, trimmed])
+    // `--` stops a leading '-' in the name from being parsed as a flag
+    this.runTmux([
+      'rename-window',
+      '-t',
+      tmuxWindow,
+      ...(trimmed.startsWith('-') ? ['--'] : []),
+      escapeTmuxFormatArg(trimmed),
+    ])
   }
 
   private listExternalWindows(): Session[] {
@@ -1064,11 +1072,15 @@ export class SessionManager {
     const baseName = suffixMatch ? suffixMatch[1] : base
     let suffix = suffixMatch ? Number.parseInt(suffixMatch[2], 10) + 1 : 2
 
-    while (checkExists(`${baseName}-${suffix}`)) {
+    let candidate = ''
+    do {
+      // Reserve room for the suffix so dedup never exceeds the name cap
+      const room = Math.max(1, MAX_WINDOW_NAME_LENGTH - `-${suffix}`.length)
+      candidate = `${baseName.slice(0, room)}-${suffix}`
       suffix += 1
-    }
+    } while (checkExists(candidate))
 
-    return `${baseName}-${suffix}`
+    return candidate
   }
 
   private assertNotReservedWindowName(name: string): void {

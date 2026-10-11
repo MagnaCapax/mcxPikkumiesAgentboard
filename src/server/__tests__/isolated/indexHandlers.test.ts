@@ -1276,13 +1276,13 @@ describe('server message handlers', () => {
       JSON.stringify({
         type: 'session-rename',
         sessionId,
-        newName: 'bad name!',
+        newName: 'bad\tname',
       })
     )
 
     expect(sent[sent.length - 1]).toEqual({
       type: 'error',
-      message: 'Name can only contain letters, numbers, hyphens, and underscores',
+      message: 'Name cannot contain control characters',
     })
   })
 
@@ -1698,11 +1698,11 @@ describe('server message handlers', () => {
     // Invalid characters
     websocket.message?.(
       ws as never,
-      JSON.stringify({ type: 'session-rename', sessionId: 'remote-1', newName: 'bad name!' })
+      JSON.stringify({ type: 'session-rename', sessionId: 'remote-1', newName: 'bad\tname' })
     )
     expect(sent[sent.length - 1]).toEqual({
       type: 'error',
-      message: 'Name can only contain letters, numbers, hyphens, and underscores',
+      message: 'Name cannot contain control characters',
     })
   })
 
@@ -1916,14 +1916,14 @@ describe('server message handlers', () => {
       JSON.stringify({
         type: 'session-create',
         projectPath: '/home/user/project',
-        name: 'bad name!',
+        name: 'bad\tname',
         host: 'remote-host',
       })
     )
 
     expect(sent[sent.length - 1]).toEqual({
       type: 'error',
-      message: 'Name can only contain letters, numbers, hyphens, and underscores',
+      message: 'Name cannot contain control characters',
     })
   })
 
