@@ -100,6 +100,7 @@ import {
 } from './tmuxFormat'
 import { timedSpawnAsync, timedSpawnSync } from './syncSpawnTiming'
 import { StallWatchdog } from './stallWatchdog'
+import { installSyncIoTiming } from './syncIoTiming'
 import { getTailscaleIp } from './tailscale'
 import { windowNameError } from './windowName'
 
@@ -428,6 +429,11 @@ function createConnectionId(): string {
   }
 }
 checkPortAvailable(config.port)
+// Instrument sync fs/sqlite calls: stall samples show the blocked main
+// thread dominated by pread() and JIT'd JS, and no call site is otherwise
+// named. Install before initDatabase — its cached prepared statements must
+// come through the patched prepare()/query() to be wrapped.
+installSyncIoTiming()
 // Refuse to share a data dir with a live agentboard server — the reconcile
 // loop would orphan that server's session claims (they're windows it can't
 // see). Isolated instances set AGENTBOARD_DATA_DIR and lock their own dir.
