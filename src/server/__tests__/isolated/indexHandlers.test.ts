@@ -419,6 +419,41 @@ mock.module('../../db', () => ({
       Array.from(dbState.records.values()).filter(
         (record) => record.currentWindow === null && record.isHibernating
       ),
+    getSessionLists: (options?: { maxAgeHours?: number; limit?: number }) => {
+      const records = Array.from(dbState.records.values())
+      let history = records.filter(
+        (record) => record.currentWindow === null && !record.isHibernating
+      )
+      if (options?.maxAgeHours) {
+        const cutoff = Date.now() - options.maxAgeHours * 60 * 60 * 1000
+        history = history.filter(
+          (record) => new Date(record.lastActivityAt).getTime() > cutoff
+        )
+      }
+      if (options?.limit !== undefined && options.limit >= 0) {
+        history = history.slice(0, options.limit)
+      }
+      const byId = (a: { sessionId: string }, b: { sessionId: string }) =>
+        a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0
+      const byActivityDesc = (
+        a: { lastActivityAt: string; sessionId: string },
+        b: { lastActivityAt: string; sessionId: string }
+      ) =>
+        a.lastActivityAt === b.lastActivityAt
+          ? byId(a, b)
+          : a.lastActivityAt < b.lastActivityAt
+            ? 1
+            : -1
+      return {
+        active: records
+          .filter((record) => record.currentWindow !== null)
+          .sort(byId),
+        hibernating: records
+          .filter((record) => record.currentWindow === null && record.isHibernating)
+          .sort(byActivityDesc),
+        history: history.sort(byActivityDesc),
+      }
+    },
     orphanSession: (sessionId: string, options?: { hibernate?: boolean }) => {
       const record = dbState.records.get(sessionId)
       if (!record) return null

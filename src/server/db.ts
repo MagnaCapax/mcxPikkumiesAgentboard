@@ -105,6 +105,17 @@ export interface SessionDatabase {
   getActiveSessions: () => AgentSessionRecord[]
   getHibernatingSessions: () => AgentSessionRecord[]
   /**
+   * Active + hibernating + history from ONE full-table scan. The three
+   * getters are called together on every poll cycle; separate queries pay
+   * the read page-in cost three times under memory pressure. `options`
+   * applies to the history bucket exactly as in getHistorySessions.
+   */
+  getSessionLists: (options?: { maxAgeHours?: number; limit?: number }) => {
+    active: AgentSessionRecord[]
+    hibernating: AgentSessionRecord[]
+    history: AgentSessionRecord[]
+  }
+  /**
    * Dormant, non-hibernating rows, newest first. Uncapped unless `limit` is
    * given: the orphan rematcher and poll snapshots must see every row, while
    * the sidebar passes its display cap.
@@ -311,6 +322,20 @@ function initializeConnection(
   )
   const selectHistoryRecent = db.prepare(
     'SELECT * FROM agent_sessions WHERE current_window IS NULL AND is_hibernating = 0 AND last_activity_at > $cutoff ORDER BY last_activity_at DESC, session_id LIMIT $limit'
+  )
+  // One statement covering all three lists, ordered so each bucket arrives
+  // pre-sorted: windowed rows first (session_id ASC via the final key),
+  // then dormant rows by last_activity_at DESC, session_id — exactly the
+  // ORDER BYs of the separate queries. The WHERE keeps unmatched rows (and
+  // their last_user_message payloads) out of the result entirely.
+  const selectSessionLists = db.prepare(
+    `SELECT * FROM agent_sessions
+     WHERE current_window IS NOT NULL
+        OR is_hibernating = 1
+        OR (is_hibernating = 0 AND ($cutoff IS NULL OR last_activity_at > $cutoff))
+     ORDER BY (current_window IS NULL),
+              CASE WHEN current_window IS NULL THEN last_activity_at END DESC,
+              session_id`
   )
   const selectKnownSessionKeys = db.prepare(
     'SELECT session_id, log_file_path, project_path, slug, agent_type, is_codex_exec FROM agent_sessions'
@@ -521,6 +546,36 @@ function initializeConnection(
       const rows = selectHibernating.all() as Record<string, unknown>[]
       return rows.map(mapRow)
     },
+    getSessionLists: (options) => {
+      if (options?.limit !== undefined && !Number.isInteger(options.limit)) {
+        throw new TypeError('getSessionLists: limit must be an integer')
+      }
+      const cutoff = options?.maxAgeHours
+        ? new Date(Date.now() - options.maxAgeHours * 60 * 60 * 1000).toISOString()
+        : null
+      const rows = selectSessionLists.all({ $cutoff: cutoff }) as Record<string, unknown>[]
+      const activeRows: Record<string, unknown>[] = []
+      const hibernatingRows: Record<string, unknown>[] = []
+      const historyRows: Record<string, unknown>[] = []
+      for (const row of rows) {
+        if (row.current_window != null) {
+          activeRows.push(row)
+        } else if (row.is_hibernating === 1) {
+          hibernatingRows.push(row)
+        } else if (row.is_hibernating === 0) {
+          historyRows.push(row)
+        }
+      }
+      // Buckets arrive pre-sorted from SQL; only the display cap is applied
+      // here (SQLite negative LIMIT = uncapped).
+      const limit = options?.limit ?? -1
+      const historyLimited = limit >= 0 ? historyRows.slice(0, limit) : historyRows
+      return {
+        active: activeRows.map(mapRow),
+        hibernating: hibernatingRows.map(mapRow),
+        history: historyLimited.map(mapRow),
+      }
+    },
     getHistorySessions: (options?: { maxAgeHours?: number; limit?: number }) => {
       // SQLite treats a negative LIMIT as no limit.
       const limit = options?.limit ?? -1
@@ -680,6 +735,7 @@ function mapRow(row: Record<string, unknown>): AgentSessionRecord {
         : String(row.launch_command),
   }
 }
+
 
 function migrateDatabase(db: SQLiteDatabase) {
   const columns = getColumnNames(db, 'agent_sessions')
