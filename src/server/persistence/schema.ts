@@ -23,7 +23,6 @@ export function createCatalogSchema(db: Database) {
   )
   if (!Number.isInteger(version) || version < 0)
     throw new Error('Invalid catalog schema version')
-  if (version === CATALOG_VERSION) return
   if (version > CATALOG_VERSION)
     throw new Error('This database requires a newer Agentboard version')
   if (version < CATALOG_VERSION) {
@@ -40,8 +39,7 @@ export function createCatalogSchema(db: Database) {
       while (fs.existsSync(backup)) backup = `${file}.before-catalog-schema.${++suffix}`
       db.query('VACUUM INTO ?').run(backup)
     }
-  }
-  db.transaction(() => {
+    db.transaction(() => {
     db.exec(`
     CREATE TABLE IF NOT EXISTS board_sessions (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, project_path TEXT NOT NULL,
@@ -85,5 +83,12 @@ export function createCatalogSchema(db: Database) {
     db.query(
       "INSERT OR REPLACE INTO app_settings(key,value) VALUES('catalog_schema_version',?)"
     ).run(String(CATALOG_VERSION))
-  })()
+    })()
+  }
+
+  // Idempotent indexes run on every init — the version gate above skips
+  // schema work for databases already at CATALOG_VERSION.
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS board_active ON board_sessions(host_id, state)'
+  )
 }
