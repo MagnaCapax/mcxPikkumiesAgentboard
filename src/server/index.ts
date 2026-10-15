@@ -1,3 +1,4 @@
+import { SessionReadClient } from './sessionReadClient'
 import type { Server, ServerWebSocket } from 'bun'
 import { createReadStream } from 'node:fs'
 import os from 'node:os'
@@ -16,6 +17,7 @@ import { SessionManager } from './SessionManager'
 import { ThrowawayShellReaper } from './throwawayShellReaper'
 import { SessionRegistry } from './SessionRegistry'
 import { PersistentSessions } from './persistence/manager'
+import { refreshDormantConversation } from './persistence/legacyImport'
 import type { SavedSession } from '../shared/persistence'
 import { PersistenceRuntime } from './persistence/runtime'
 import { registerPersistenceRoutes } from './persistence/routes'
@@ -496,6 +498,9 @@ logger.info('terminal_mode_resolved', {
 
 const app = new Hono()
 const db = initDatabase({ exclusive: true })
+const sessionReader = db.db?.filename && db.db.filename !== ':memory:'
+  ? new SessionReadClient(db.db.filename)
+  : undefined
 
 // Read mouse mode setting from DB (default: true)
 const TMUX_MOUSE_MODE_KEY = 'tmux_mouse_mode'
@@ -599,7 +604,7 @@ function persistenceHostId(): string {
   return id
 }
 const persistence = db.db
-  ? new PersistentSessions(db, sessionManager, persistenceHostId())
+  ? new PersistentSessions(db, sessionManager, persistenceHostId(), undefined, undefined, undefined, sessionReader)
   : null
 const persistenceRuntime = persistence
   ? new PersistenceRuntime(persistence, db)
@@ -814,6 +819,11 @@ const lastUserMessageLocks = new Map<string, number>()
 const LAST_USER_MESSAGE_LOCK_MS = 60_000 // 60 seconds
 
 const logPoller = new LogPoller(db, registry, {
+  reader: sessionReader,
+  onSessionUpdated: (record) => {
+    if (persistence) refreshDormantConversation(persistence.catalog, record)
+    if (!record.currentWindow) queueDormantRefresh()
+  },
   onSessionOrphaned: (sessionId, supersededBy) => {
     // Scan first: the dormant lists read PRs from the cache this scan fills.
     const session = db.getSessionById(sessionId)
@@ -909,6 +919,18 @@ setCodexSubagentIndexListener(() => {
     dormantPrScanner.queue([...hibernating, ...history])
   }, 0)
 })
+
+// A poll can update many dormant rows. Refresh the published sidebar snapshot
+// once after that batch, rather than retaining the import-time messages.
+let dormantRefreshQueued = false
+function queueDormantRefresh() {
+  if (dormantRefreshQueued) return
+  dormantRefreshQueued = true
+  queueMicrotask(() => {
+    dormantRefreshQueued = false
+    updateDormantAgentSessions()
+  })
+}
 
 // Dormant rows show the PRs found by the last scan; the scanner fills in the
 // rest in small slices and calls back here when it finds new ones.
@@ -2465,6 +2487,8 @@ async function cleanupAllTerminals() {
   setCodexSubagentIndexListener(null)
   dormantPrScanner.stop()
   logPoller.stop()
+  persistence?.dispose()
+  sessionReader?.dispose()
   remotePoller?.stop()
   db.close()
 }

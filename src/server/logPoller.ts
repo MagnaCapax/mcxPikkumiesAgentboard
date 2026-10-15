@@ -1,6 +1,7 @@
 import { logger } from './logger'
 import { config } from './config'
-import type { SessionDatabase } from './db'
+import type { AgentSessionRecord, SessionDatabase } from './db'
+import type { PollSnapshot, SessionReader, SnapshotOptions } from './sessionReads'
 import { getLogSearchDirs, normalizeProjectPath } from './logDiscovery'
 import { agentFamily } from './agentDetection'
 import { DEFAULT_SCROLLBACK_LINES, extractLastEntryTimestamp, isSameOrChildPath, isToolNotificationText } from './logMatcher'
@@ -11,7 +12,7 @@ import type { SessionRegistry } from './SessionRegistry'
 import { LogMatchWorkerClient } from './logMatchWorkerClient'
 import { LogWatcher } from './logWatcher'
 import type { AgentType, Session } from '../shared/types'
-import type { KnownSession, LogEntrySnapshot } from './logPollData'
+import type { LogEntrySnapshot } from './logPollData'
 import {
   getEntriesNeedingMatch,
   type SessionSnapshot,
@@ -192,9 +193,12 @@ export class LogPoller {
   private startupReconciliationTimer: ReturnType<typeof setTimeout> | null = null
   private devinSyncInterval: ReturnType<typeof setInterval> | null = null
   private logWatcher: LogWatcher | null = null
+  private reader?: SessionReader
+  private stopped = false
   private db: SessionDatabase
   private registry: SessionRegistry
   private onSessionOrphaned?: (sessionId: string, supersededBy?: string) => void
+  private onSessionUpdated?: (record: AgentSessionRecord) => void
   private onSessionActivated?: (sessionId: string, window: string) => void
   private onOrphanSessionsDiscovered?: (stats: { newOrphans: number }) => void
   private isLastUserMessageLocked?: (tmuxWindow: string) => boolean
@@ -225,6 +229,7 @@ export class LogPoller {
     {
       onSessionOrphaned,
       onSessionActivated,
+      onSessionUpdated,
       onOrphanSessionsDiscovered,
       isLastUserMessageLocked,
       maxLogsPerPoll,
@@ -234,8 +239,10 @@ export class LogPoller {
       matchWorkerClient,
       devinSyncClient,
       startupReconciliationDelayMs,
+      reader,
     }: {
       onSessionOrphaned?: (sessionId: string, supersededBy?: string) => void
+      onSessionUpdated?: (record: AgentSessionRecord) => void
       onSessionActivated?: (sessionId: string, window: string) => void
       onOrphanSessionsDiscovered?: (stats: { newOrphans: number }) => void
       isLastUserMessageLocked?: (tmuxWindow: string) => boolean
@@ -246,12 +253,15 @@ export class LogPoller {
       matchWorkerClient?: MatchWorkerClient
       devinSyncClient?: DevinSyncClient | null
       startupReconciliationDelayMs?: number
+      reader?: SessionReader
     } = {}
   ) {
+    this.reader = reader
     this.db = db
     this.registry = registry
     this.onSessionOrphaned = onSessionOrphaned
     this.onSessionActivated = onSessionActivated
+    this.onSessionUpdated = onSessionUpdated
     this.onOrphanSessionsDiscovered = onOrphanSessionsDiscovered
     this.isLastUserMessageLocked = isLastUserMessageLocked
     const limit = maxLogsPerPoll ?? DEFAULT_MAX_LOGS
@@ -271,6 +281,23 @@ export class LogPoller {
       devinSyncClient === undefined
         ? new DevinSyncWorkerClient()
         : devinSyncClient
+  }
+
+  private async readSnapshot(options: SnapshotOptions): Promise<PollSnapshot> {
+    if (this.stopped) throw new Error('Log poller stopped')
+    const snapshot = this.reader
+      ? await this.reader.snapshot(options)
+      : {
+          lists: this.db.getSessionLists(options.maxAgeHours === undefined ? undefined : { maxAgeHours: options.maxAgeHours }),
+          knownSessions: options.paths === undefined
+            ? this.db.getKnownSessionKeys()
+            : options.paths.flatMap((logPath) => {
+                const record = this.db.getSessionByLogPath(logPath)
+                return record ? [record] : []
+              }),
+        }
+    if (this.stopped) throw new Error('Log poller stopped')
+    return snapshot
   }
 
   start(intervalMs = DEFAULT_INTERVAL_MS, mode: 'poll' | 'watch' = 'poll'): void {
@@ -344,10 +371,16 @@ export class LogPoller {
   }
 
   private async runComprehensiveReconciliation(): Promise<void> {
-    const stats = await this.pollOnce()
-    if (!stats.completed || stats.errors > 0) return
-    if (this.orphanRematchPending && !this.orphanRematchInProgress) {
-      this.orphanRematchPromise = this.runOrphanRematchInBackground()
+    try {
+      const stats = await this.pollOnce()
+      if (!stats.completed || stats.errors > 0 || this.stopped) return
+      if (this.orphanRematchPending && !this.orphanRematchInProgress) {
+        this.orphanRematchPromise = this.runOrphanRematchInBackground()
+      }
+    } catch (error) {
+      if (this.stopped) return
+      this.matchingError = String(error)
+      logger.warn('log_snapshot_error', { message: String(error) })
     }
   }
 
@@ -398,7 +431,7 @@ export class LogPoller {
 
       const rematchStartedAt = Date.now()
       const selectionStartedAt = Date.now()
-      const lists = this.db.getSessionLists()
+      const { lists } = await this.readSnapshot({ paths: [] })
       const dormantSessions = [...lists.hibernating, ...lists.history]
       const logDirs = getLogSearchDirs()
       const excludedProjects = config.excludeProjects ?? []
@@ -497,7 +530,7 @@ export class LogPoller {
         if (!window) continue
 
         const existing = this.db.getSessionByLogPath(match.logPath)
-        if (existing && !existing.currentWindow) {
+        if (existing && !existing.currentWindow && canAttemptDormantRematch(existing)) {
           // Check if window is already claimed by another session
           if (claimedWindows.has(match.tmuxWindow)) {
             logger.info('orphan_rematch_skipped_window_claimed', {
@@ -556,7 +589,7 @@ export class LogPoller {
         // Match unmatched orphans by display name
         for (const orphan of unmatchedOrphans) {
           const existing = this.db.getSessionByLogPath(orphan.logFilePath)
-          if (!existing || existing.currentWindow) continue
+          if (!existing || existing.currentWindow || !canAttemptDormantRematch(existing)) continue
 
           const window = unclaimedByName.get(existing.displayName)
           if (window) {
@@ -596,7 +629,7 @@ export class LogPoller {
           const window = lockMatches.get(orphan.sessionId)
           if (!window || claimedWindows.has(window.tmuxWindow)) continue
           const existing = this.db.getSessionByLogPath(orphan.logFilePath)
-          if (!existing || existing.currentWindow) continue
+          if (!existing || existing.currentWindow || !canAttemptDormantRematch(existing)) continue
           this.db.updateSession(existing.sessionId, {
             currentWindow: window.tmuxWindow,
             displayName: window.name,
@@ -636,6 +669,7 @@ export class LogPoller {
    * if polling needs to resume.
    */
   stop(): void {
+    this.stopped = true
     if (this.interval) {
       clearInterval(this.interval)
     }
@@ -728,11 +762,12 @@ export class LogPoller {
     try {
       if (!this.matchWorker) return
 
-      const windows = this.registry.getAll()
       const logDirs = getLogSearchDirs()
-      const lists = this.db.getSessionLists({
+      const { lists, knownSessions } = await this.readSnapshot({
         maxAgeHours: HISTORY_SNAPSHOT_MAX_AGE_HOURS,
+        paths: pathsToPoll,
       })
+      const windows = this.registry.getAll()
       const sessionRecords = [...lists.active, ...lists.hibernating, ...lists.history]
       const sessions: SessionSnapshot[] = sessionRecords.map((session) => ({
         sessionId: session.sessionId,
@@ -742,21 +777,6 @@ export class LogPoller {
         lastUserMessage: toSnapshotMessage(session.lastUserMessage),
         lastKnownLogSize: session.lastKnownLogSize,
       }))
-      // Watch batches are already path-scoped. Resolve metadata only for those
-      // paths instead of loading and cloning every historical session key.
-      const knownSessions: KnownSession[] = pathsToPoll.flatMap((logPath) => {
-        const session = this.db.getSessionByLogPath(logPath)
-        if (!session) return []
-        return [{
-          logFilePath: session.logFilePath,
-          sessionId: session.sessionId,
-          projectPath: session.projectPath,
-          slug: session.slug,
-          agentType: session.agentType,
-          isCodexExec: session.isCodexExec,
-        }]
-      })
-
       const response = await this.matchWorker.poll({
         windows,
         logDirs,
@@ -914,6 +934,9 @@ export class LogPoller {
           })
           if (update) {
             this.db.updateSession(existing.sessionId, update)
+            if (update.lastUserMessage !== undefined || update.lastActivityAt !== undefined) {
+              this.onSessionUpdated?.({ ...existing, ...update })
+            }
           }
           const shouldAttemptRematch =
             canAttemptDormantRematch(existing) &&
@@ -1008,6 +1031,9 @@ export class LogPoller {
           })
           if (updateById) {
             this.db.updateSession(sessionId, updateById)
+            if (updateById.lastUserMessage !== undefined || updateById.lastActivityAt !== undefined) {
+              this.onSessionUpdated?.({ ...existingById, ...updateById })
+            }
           }
 
           // Re-attempt matching for orphaned sessions (no currentWindow)
@@ -1217,11 +1243,11 @@ export class LogPoller {
     let processMs = 0
 
     try {
-      const windows = this.registry.getAll()
       const logDirs = getLogSearchDirs()
-      const lists = this.db.getSessionLists({
+      const { lists, knownSessions } = await this.readSnapshot({
         maxAgeHours: HISTORY_SNAPSHOT_MAX_AGE_HOURS,
       })
+      const windows = this.registry.getAll()
       const sessionRecords = [...lists.active, ...lists.hibernating, ...lists.history]
       let shouldBackfillLastMessage = false
       if (this.startupLastMessageBackfillPending) {
@@ -1242,7 +1268,6 @@ export class LogPoller {
         lastUserMessage: toSnapshotMessage(session.lastUserMessage),
         lastKnownLogSize: session.lastKnownLogSize,
       }))
-      const knownSessions: KnownSession[] = this.db.getKnownSessionKeys()
 
       const lastMessageCandidates: LastMessageCandidate[] = []
       if (this.startupLastMessageBackfillPending) {
