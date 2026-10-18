@@ -10,6 +10,10 @@ import { Hono, type Context } from 'hono'
 import { serveStatic } from 'hono/bun'
 import { config, isValidHostname } from './config'
 import { createPasteFileRoutes } from './routes/pasteFile'
+import { OwnershipObserver } from './ownership/observer'
+import { OwnershipMatcher } from './ownership/matcher'
+import { createLocalOwnershipIO } from './ownership/localIO'
+import { probeOwnership } from './ownership/probe'
 import { ensureTmux } from './prerequisites'
 import { applyNestedTmuxDecision } from './tmuxIsolation'
 import { sanitizedTmuxEnv } from './tmuxEnv'
@@ -844,6 +848,7 @@ const logPoller = new LogPoller(db, registry, {
       broadcast({ type: 'session-orphaned', session: orphaned, supersededBy })
     }
   },
+  allowsMatch: (window, sessionId) => ownershipMatcher?.allows(window, sessionId) ?? true,
   onSessionActivated: (sessionId, window) => {
     updateDormantAgentSessions()
     const session = db.getSessionById(sessionId)
@@ -867,6 +872,44 @@ const logPoller = new LogPoller(db, registry, {
 })
 const sessionRefreshWorker = new SessionRefreshWorkerClient()
 const lastUserMessageWorker = new SessionRefreshWorkerClient()
+const ownershipMatcher = config.ownershipMatching ? new OwnershipMatcher({
+  db,
+  windows: () => registry.getAll(),
+  missing: result => {
+    // Queue exact Codex paths through the existing enrichment worker. Claude
+    // transcripts enter through normal discovery; their registry has no path.
+    if (result.transcript) void logPoller.pollChanged([result.transcript])
+  },
+  changed: (sessionId, window, previous) => {
+    refreshGeneration++
+    logger.info('session_matched_by_ownership', { sessionId, window, previous })
+    if (previous) {
+      const old = db.getSessionById(previous)
+      if (old) broadcast({ type: 'session-orphaned', session: toAgentSession(old), supersededBy: sessionId })
+    }
+    const record = db.getSessionById(sessionId)!
+    const live = registry.getAll().find(session => session.tmuxWindow === window && !session.remote)
+    if (live) registry.updateSession(live.id, {
+      agentSessionId: sessionId, agentSessionName: record.displayName,
+      logFilePath: record.logFilePath, lastUserMessage: record.lastUserMessage ?? undefined,
+    })
+    broadcast({ type: 'session-activated', session: toAgentSession(record), window })
+    updateDormantAgentSessions()
+    refreshSessions()
+  },
+}) : null
+const ownershipObserver = config.ownershipObserver || ownershipMatcher ? (() => {
+  const io = createLocalOwnershipIO({ codexHome: config.codexHomeDir, claudeHome: config.claudeConfigDir })
+  return new OwnershipObserver({
+    windows: () => registry.getAll(),
+    probe: windows => probeOwnership(windows, io),
+    accept: (result, window) => ownershipMatcher?.accept(result, window),
+    log: (event, data) => {
+      if (event === 'ownership_observation_summary') logger.debug(event, data)
+      else logger.info(event, data)
+    },
+  })
+})() : null
 
 // Active sessions update on every refresh — cheap (few rows).
 // History sessions query is expensive — only run on actual mutations.
@@ -1040,7 +1083,14 @@ export function hydrateSessionsWithAgentSessions(
     let verification: WindowLogVerificationResult | null = null
     let nameMatches = false
 
-    if (precomputed) {
+    const liveWindow = sessions.find(session => session.tmuxWindow === currentWindow)
+    // Positive process evidence outranks text, including stale startup worker
+    // results. Keep the old claim while a new owned transcript is discovered.
+    if (liveWindow && ownershipMatcher?.get({ ...liveWindow,
+      agentType: liveWindow.agentType ?? agentSession.agentType, agentSessionId: agentSession.sessionId,
+    })) {
+      verification = { status: 'verified', bestMatch: null }
+    } else if (precomputed) {
       verification = precomputed.verification
       nameMatches = precomputed.nameMatches
     } else if (verifyAssociations) {
@@ -2431,6 +2481,7 @@ const startupLifecycle = createStartupLifecycle({
   registry,
   sockets,
   canPruneWsSessions: startupEnsureResult.canPruneWsSessions,
+  hasOwnership: window => Boolean(ownershipMatcher?.get(window)),
   hydrateSessionsWithAgentSessions,
   applyForceWorkingOverrides,
   mergeRemoteSessions,
@@ -2462,9 +2513,11 @@ export const startupReady = (async () => {
   // Start the poller after the initial refresh rather than at module load —
   // its first snapshot does synchronous sqlite work that otherwise races the
   // worker-spawn burst during boot.
+  await ownershipObserver?.observe()
   if (config.logPollIntervalMs > 0) {
     logPoller.start(config.logPollIntervalMs, config.logWatchMode)
   }
+  ownershipObserver?.start()
   await startupLifecycle.startupHousekeeping()
   try {
     await startupLifecycle.completeStartupVerification()
@@ -2477,6 +2530,7 @@ export const startupReady = (async () => {
 
 // Cleanup all terminals on server shutdown
 async function cleanupAllTerminals() {
+  ownershipObserver?.stop()
   persistenceRuntime?.stop()
   const disposePromises: Promise<void>[] = []
   for (const ws of sockets) {
