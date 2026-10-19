@@ -39,7 +39,7 @@ export async function bootstrap(): Promise<boolean> {
     const headers = new Headers(input instanceof Request ? input.headers : init?.headers)
     headers.set('Authorization', `Bearer ${launch?.bearer ?? ''}`)
     return nativeFetch(input, { ...init, headers, credentials: 'omit' }).then((result) => {
-      if (result.status === 401 && !reconnectFromPanel()) showUnavailable()
+      if ([401, 502, 503, 504].includes(result.status) && !reconnectFromPanel()) showUnavailable()
       return result
     }).catch((error) => { showUnavailable(); throw error })
   }) as typeof window.fetch

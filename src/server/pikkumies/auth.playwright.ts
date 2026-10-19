@@ -3,11 +3,15 @@ import { expect, test } from '@playwright/test'
 test('fragment exchange and guarded simplified interface', async ({ page, request }, testInfo) => {
   const port = Number(process.env.E2E_PORT) || 4176
   const base = `http://127.0.0.1:${port}`
-  const token = 'e'.repeat(48)
+  const token = 'e'.repeat(64)
   const seenUrls: string[] = []
   page.on('request', (req) => seenUrls.push(req.url()))
   await page.goto(`${base}/#${token}`)
   await expect(page.getByTestId('pikkumies-layout')).toBeVisible()
+  await expect(page).toHaveTitle('Pikkumies')
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', '/pikkumies.svg')
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', '/pikkumies.webmanifest')
+  await expect(page.getByRole('tab', { name: /Primary/ })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: 'New Pikkumies' })).toBeVisible()
   await expect(page.getByText('Primary', { exact: true })).toBeVisible()
   expect((await page.getByTestId('pikkumies-strip').boundingBox())?.height).toBe(44)
@@ -19,8 +23,22 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   expect(unauth.headers()['content-security-policy']).toContain('frame-ancestors https://panel.example.test')
   expect((await request.get(`${base}/ws`)).status()).toBe(401)
   expect((await request.get(`${base}/bar`)).status()).toBe(401)
+  for (const route of ['/api/eternals', '/api/settings/synced', '/api/health', '/api/unknown']) {
+    const response = await request.get(`${base}${route}`)
+    expect(response.status()).toBe(401)
+    expect(response.headers()['set-cookie']).toBeUndefined()
+    expect(response.headers()['content-security-policy']).toContain('frame-ancestors')
+  }
+  for (const token of ['z'.repeat(64), 'a'.repeat(63), 'A'.repeat(64)]) {
+    expect((await request.post(`${base}/api/auth`, { data: { token } })).status()).toBe(401)
+  }
   expect((await request.get(`${base}/favicon.svg`)).status()).toBe(200)
   expect((await request.get(`${base}/fonts/jetbrains-mono-latin-wght-normal.woff2`)).status()).toBe(200)
+  const asset = await page.locator('script[src*="/assets/"]').getAttribute('src')
+  expect(asset).toBeTruthy()
+  const compressed = await request.get(`${base}${asset}`, { headers: { 'Accept-Encoding': 'gzip' } })
+  expect(compressed.headers()['cache-control']).toContain('immutable')
+  expect(compressed.headers()['content-encoding']).toBe('gzip')
   expect((await request.get(`${base}/api/session-media/id`)).status()).toBe(404)
   const authenticated = await page.evaluate(async () => {
     const response = await fetch('/api/eternals')
@@ -38,6 +56,24 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
     ws.onmessage = () => { frames++ }
     ws.onopen = () => { setTimeout(() => { ws.close(); resolve(frames) }, 300) }
   }))).toBe(0)
+  expect(await page.evaluate(() => new Promise<number>((resolve) => {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`)
+    ws.onclose = (event) => resolve(event.code)
+  }))).toBe(1008)
+  const delivered: string[] = []
+  await page.route('**/api/ask', async (route) => {
+    delivered.push((route.request().postDataJSON() as { text: string }).text)
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":true,"code":0}' })
+  })
+  const sender = await page.context().newPage()
+  await sender.goto(base)
+  await sender.evaluate(() => localStorage.setItem('pending-ask', JSON.stringify([
+    { text: 'first question', nonce: 'a'.repeat(20), ts: Date.now() },
+    { text: 'second question', nonce: 'b'.repeat(20), ts: Date.now() },
+  ])))
+  await expect.poll(() => delivered).toEqual(['first question', 'second question'])
+  await expect(page.getByText('Not sent yet:')).toHaveCount(0)
+  await sender.close()
   await page.screenshot({ path: testInfo.outputPath('pikkumies.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   expect((await page.getByTestId('pikkumies-strip').boundingBox())?.height).toBe(44)

@@ -34,7 +34,7 @@ import type { ClientMessage, SendClientMessage, ServerMessage, ServerMessageWith
 import type { ConnectionStatus } from '../stores/sessionStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { clientLog } from '../utils/clientLog'
-import { currentBearer } from '../pikkumies/bootstrap'
+import { currentBearer, currentLaunch, reconnectFromPanel } from '../pikkumies/bootstrap'
 
 type MessageListener = (message: ServerMessage) => void
 
@@ -134,6 +134,7 @@ export class WebSocketManager {
   private leakedSockets = new Set<WebSocket>()
   /** Pending verification timer — non-null while awaiting a verify pong. */
   private verifyTimer: number | null = null
+  private hiddenCloseTimer: number | null = null
 
   private wsSnap() {
     return {
@@ -283,6 +284,11 @@ export class WebSocketManager {
       this.cancelVerify()
       this.consecutiveFailures += 1
       this.ws = null
+      if (currentLaunch()) {
+        void fetch('/api/health').then((response) => {
+          if ([401, 502, 503, 504].includes(response.status)) reconnectFromPanel()
+        }).catch(() => { /* normal reconnect handles transient network failure */ })
+      }
       if (!this.manualClose) {
         this.scheduleReconnect()
       } else {
@@ -342,6 +348,8 @@ export class WebSocketManager {
 
     this.lifecycleStarted = false
     document.removeEventListener('visibilitychange', this.onVisibilityChange)
+    if (this.hiddenCloseTimer !== null) window.clearTimeout(this.hiddenCloseTimer)
+    this.hiddenCloseTimer = null
     window.removeEventListener('pageshow', this.onPageShow)
     if (this.wakeCheckInterval !== null) {
       window.clearInterval(this.wakeCheckInterval)
@@ -391,6 +399,8 @@ export class WebSocketManager {
   private onVisibilityChange = () => {
     clientLog('ws_visibility', { state: document.visibilityState, ...this.wsSnap() }, 'info')
     if (document.visibilityState === 'visible') {
+      if (this.hiddenCloseTimer !== null) window.clearTimeout(this.hiddenCloseTimer)
+      this.hiddenCloseTimer = null
       const now = Date.now()
       const gap = now - this.lastTick
       // Reset lastTick before reconnect to prevent the wake-check interval
@@ -411,6 +421,12 @@ export class WebSocketManager {
         this.forceReconnect('visibilitychange', true)
       }
     } else {
+      if (currentLaunch()?.mode === 'pikkumies') {
+        this.hiddenCloseTimer = window.setTimeout(() => {
+          this.hiddenCloseTimer = null
+          if (this.isHidden()) { this.destroySocket(); this.setStatus('disconnected') }
+        }, 10 * 60_000)
+      }
       // Pause heartbeat when hidden — iOS freezes timers anyway,
       // and pong timeout would false-positive on wake.
       this.stopHeartbeat()
