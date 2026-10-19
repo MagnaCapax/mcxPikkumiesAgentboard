@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session, SendClientMessage, SubscribeServerMessage } from '../../shared/types'
 import type { ConnectionStatus } from '../stores/sessionStore'
 import Terminal from '../components/Terminal'
+import { ToastViewport } from '../components/Toast'
 
 type EternalState = 'running' | 'starting' | 'waiting-for-setup' | 'not-ready' | 'quit'
 type Eternal = { id: string; state: EternalState }
@@ -137,5 +138,6 @@ export default function PikkumiesLayout(props: Props) {
         <div className="flex justify-end gap-3"><button onClick={() => setClosingId(null)}>Keep it</button><button onClick={() => { void close() }}>Close it</button></div>
       </div>
     </div>}
+    <ToastViewport />
   </div>
 }

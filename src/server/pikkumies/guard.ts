@@ -60,13 +60,16 @@ export function validateRuntime(env: NodeJS.ProcessEnv, socket: string): void {
   if (!path.isAbsolute(socket)) throw new Error('Account socket must be an absolute path')
   const home = env.HOME
   const temporary = env.TMPDIR
-  if (!home || !temporary) throw new Error('A private account temporary directory is required')
+  const tokenDir = env.AGENTBOARD_TOKEN_DIR
+  if (!home || !temporary || !tokenDir) throw new Error('Private account directories are required')
   const resolvedHome = realpathSync(home)
-  const resolvedTemporary = realpathSync(temporary)
-  const info = statSync(resolvedTemporary)
-  if (!info.isDirectory() || (info.mode & 0o077) !== 0 ||
-      !resolvedTemporary.startsWith(resolvedHome + path.sep)) {
-    throw new Error('Account temporary directory must be private and inside the home')
+  for (const directory of [temporary, tokenDir, path.dirname(socket)]) {
+    const resolved = realpathSync(directory)
+    const info = statSync(resolved)
+    if (!info.isDirectory() || (info.mode & 0o077) !== 0 ||
+        !resolved.startsWith(resolvedHome + path.sep)) {
+      throw new Error('Account runtime directories must be private and inside the home')
+    }
   }
 }
 
@@ -77,7 +80,7 @@ export class AccountGuard {
   private openClients = 0
 
   private readonly staticAllow: Set<string>
-  constructor(readonly config: GuardConfig, allowedStaticPaths = staticPaths(config.staticDir)) {
+  constructor(readonly config: GuardConfig, allowedStaticPaths = staticPaths(config.staticDir), private readonly onExpiry = () => {}) {
     this.staticAllow = allowedStaticPaths
   }
 
@@ -116,7 +119,8 @@ export class AccountGuard {
     try {
       await rename(file, claimed)
       const info = await stat(claimed)
-      if (!info.isFile() || info.size > 4096 || Date.now() - info.mtimeMs > MAX_LAUNCH_AGE_MS) return new Response(null, { status: 401 })
+      if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size > 4096 ||
+          Date.now() - info.mtimeMs > MAX_LAUNCH_AGE_MS) return new Response(null, { status: 401 })
       const handle = await open(claimed, 'r')
       try {
         const body = (await handle.readFile('utf8')).trim()
@@ -127,6 +131,7 @@ export class AccountGuard {
     if (!this.bearer || Date.now() - this.issuedAt >= MAX_BEARER_AGE_MS) {
       this.bearer = randomBytes(32).toString('base64url')
       this.issuedAt = Date.now()
+      setTimeout(this.onExpiry, MAX_BEARER_AGE_MS).unref?.()
     }
     this.touch()
     return Response.json({ bearer: this.bearer, allowedOrigin: this.config.allowedOrigin, launcherUrl: this.config.launcherUrl, mode: this.config.mode }, { headers: { 'Cache-Control': 'no-store' } })

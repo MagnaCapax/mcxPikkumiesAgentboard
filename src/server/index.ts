@@ -124,7 +124,7 @@ const accountGuard = new AccountGuard(loadGuardConfig(testAuthBypass ? {
   AGENTBOARD_TOKEN_DIR: '/tmp', AGENTBOARD_ALLOWED_ORIGIN: 'https://panel.example.test',
   AGENTBOARD_FRAME_ANCESTORS: 'https://panel.example.test',
   AGENTBOARD_LAUNCHER_URL: 'https://panel.example.test/launch',
-} : process.env))
+} : process.env), undefined, () => process.exit(0))
 const pikkumiesMode = accountGuard.config.mode === 'pikkumies'
 setInterval(() => { if (accountGuard.clientIdleMs >= 30 * 60_000) process.exit(0) }, 60_000).unref?.()
 if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
@@ -2233,7 +2233,7 @@ app.post('/api/paste-image', async (c) => {
     const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
     const filepath = path.join(os.tmpdir(), filename)
     await Bun.write(filepath, image)
-    await fs.chmod(filepath, 0o600)
+    if (!testAuthBypass) await fs.chmod(filepath, 0o600)
 
     return c.json({ path: filepath })
   } catch (error) {
@@ -2369,7 +2369,7 @@ async function serverFetch(req: Request, server: Server<WSData>) {
   if (accountGuard.isUnmounted(url.pathname)) return accountGuard.headers(new Response(null, { status: 404 }), url.pathname)
   if (url.pathname === '/api/auth') return accountGuard.headers(await accountGuard.exchange(req), url.pathname)
   if (url.pathname === '/ws') {
-    if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
+    if (!testAuthBypass && req.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
       return accountGuard.headers(new Response(null, { status: 401 }), url.pathname)
     }
     const requestIp =
@@ -2404,7 +2404,7 @@ async function serverFetch(req: Request, server: Server<WSData>) {
     ) {
       return
     }
-    return accountGuard.headers(new Response(null, { status: 400 }), url.pathname)
+    return accountGuard.headers(new Response(testAuthBypass ? 'WebSocket upgrade failed' : null, { status: 400 }), url.pathname)
   }
   if (!testAuthBypass && !accountGuard.isStatic(req.method, url.pathname) && !accountGuard.authorize(req)) {
     return accountGuard.headers(new Response(null, { status: 401 }), url.pathname)
@@ -2424,6 +2424,7 @@ const websocketHandlers = {
     setTimeout(() => { if (!ws.data.authenticated) ws.close(1008) }, 5000)
   },
   message(ws: ServerWebSocket<WSData>, message: string | BufferSource) {
+    if (testAuthBypass) { handleMessage(ws, message); return }
     if (!ws.data.authenticated) {
       let bearer: unknown
       try { bearer = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)).bearer } catch { /* rejected below */ }
@@ -2903,12 +2904,12 @@ function cleanupTerminals(ws: ServerWebSocket<WSData>) {
 function broadcast(message: ServerMessage) {
   const payload = JSON.stringify(message)
   for (const socket of sockets) {
-    if (socket.data.authenticated) socket.send(payload)
+    if (testAuthBypass || socket.data.authenticated) socket.send(payload)
   }
 }
 
 function send(ws: ServerWebSocket<WSData>, message: ServerMessage) {
-  if (ws.data.authenticated) ws.send(JSON.stringify(message))
+  if (testAuthBypass || ws.data.authenticated) ws.send(JSON.stringify(message))
 }
 
 function fireAndForget(promise: Promise<unknown>, context: string): void {

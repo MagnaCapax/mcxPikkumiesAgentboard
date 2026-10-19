@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { AccountGuard, loadGuardConfig } from './guard'
+import { AccountGuard, loadGuardConfig, validateRuntime } from './guard'
 
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
@@ -18,6 +18,19 @@ function makeGuard(dir: string) {
 }
 
 describe('account guard', () => {
+  test('requires private directories inside the account home', async () => {
+    const home = await mkdtemp(path.join(tmpdir(), 'board-home-')); dirs.push(home)
+    const ui = path.join(home, 'ui')
+    const temporary = path.join(ui, 'tmp')
+    const tokens = path.join(ui, 'tokens')
+    await mkdir(temporary, { recursive: true, mode: 0o700 })
+    await mkdir(tokens, { mode: 0o700 })
+    const env = { HOME: home, TMPDIR: temporary, AGENTBOARD_TOKEN_DIR: tokens }
+    expect(() => validateRuntime(env, path.join(ui, 'ui.sock'))).not.toThrow()
+    await chmod(temporary, 0o755)
+    expect(() => validateRuntime(env, path.join(ui, 'ui.sock'))).toThrow()
+  })
+
   test('fails closed for missing configuration and unknown paths', async () => {
     expect(() => loadGuardConfig({})).toThrow()
     const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)

@@ -117,6 +117,7 @@ async function main() {
     // when bun's readdir order puts it before SessionPreviewModal.test.tsx
     // (e.g. on Linux ext4) the modal test sees the stub and breaks.
     const ISOLATED_CLIENT_FILES = new Set([
+      'main.test.ts',
       // agentIcon.test.tsx stubs the shared components/icons module; a
       // module stub leaks into every later importer in the same process
       // (prChips.test.tsx once saw XCloseIcon lose forwarded props).
