@@ -101,4 +101,22 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   await page.getByRole('button', { name: 'Close Pikkumies 2' }).click()
   await page.getByRole('button', { name: 'Close it' }).click()
   await expect(page.getByRole('tab', { name: /Primary/ })).toHaveAttribute('aria-selected', 'true')
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.waitForTimeout(100)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => page.locator('.xterm-helper-textarea').evaluate((element) => document.activeElement === element)).toBe(true)
+  await page.clock.install()
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    const original = WebSocket.prototype.close
+    ;(window as Window & { __closedSockets?: number }).__closedSockets = 0
+    WebSocket.prototype.close = function (...args) {
+      ;(window as Window & { __closedSockets?: number }).__closedSockets!++
+      return original.apply(this, args)
+    }
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.fastForward(10 * 60_000)
+  expect(await page.evaluate(() => (window as Window & { __closedSockets?: number }).__closedSockets)).toBeGreaterThan(0)
 })
