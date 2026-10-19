@@ -22,7 +22,7 @@ The account's local state is under `~/.mcxPikkumies/pikkumies/local`. The simpli
 | Background work | Simplified mode does not start transcript polling, ownership matching, metadata scans, PR lookups, or persistence maintenance. Its file, media, directory, preview, PR, and client-log routes return 404. |
 | Offline cache | The upstream service worker and PWA fallback are removed so a cached page cannot outlive an account launch or replace an unavailable launcher page. |
 | Standard mode | Keeps the full Agentboard interface with the same guard and Unix socket. Automatic session resume defaults on. Account-controlled file responses are attachments with `nosniff` and CSP sandbox. Existing Hermes windows in the full interface are not auto-resumed. |
-| Release | Upstream release-please, npm platform packages, npm publishing, and Homebrew publishing are removed. CI builds a Linux x64 binary and SHA-256 checksum as artifacts. Fork releases attach the prebuilt binary and checksum to GitHub Releases; they do not publish npm packages. |
+| Release | Upstream release-please, npm platform packages, npm publishing, and Homebrew publishing are removed. CI builds a Linux x64 binary and SHA-256 checksum as artifacts. Fork tag releases attach the binary, checksum, and frontend bundle to GitHub Releases; they do not publish npm packages. |
 
 ### Controls omitted from simplified mode
 
