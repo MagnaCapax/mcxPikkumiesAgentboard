@@ -12,6 +12,8 @@ The UI strips the fragment, exchanges the token at `POST /api/auth`, and keeps t
 
 The account's local state is under `~/.mcxPikkumies/pikkumies/local`. The simplified process uses `local/ui/ui.sock`, `local/ui/tokens/` and `local/ui/tmp/`; the launcher creates the directories with mode `0700` and token files with mode `0600`. The UI writes pasted images to its private temporary directory with mode `0600`.
 
+Install the release's `dist/client` bundle beside the compiled binary. The binary serves that directory by default; `AGENTBOARD_STATIC_DIR` can override it.
+
 ## Changes from upstream
 
 | Area | Fork behavior |

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, writeFile, rm, mkdir, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { AccountGuard, loadGuardConfig, validateRuntime } from './guard'
+import { AccountGuard, loadGuardConfig, resolveStaticDir, validateRuntime } from './guard'
 
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
@@ -18,6 +18,10 @@ function makeGuard(dir: string) {
 }
 
 describe('account guard', () => {
+  test('compiled binaries load frontend files next to the executable', () => {
+    expect(resolveStaticDir({}, '/opt/board/agentboard', true)).toBe('/opt/board/dist/client')
+    expect(resolveStaticDir({ AGENTBOARD_STATIC_DIR: '/another/root' }, '/opt/board/agentboard', true)).toBe('/another/root')
+  })
   test('requires private directories inside the account home', async () => {
     const home = await mkdtemp(path.join(tmpdir(), 'board-home-')); dirs.push(home)
     const ui = path.join(home, 'ui')

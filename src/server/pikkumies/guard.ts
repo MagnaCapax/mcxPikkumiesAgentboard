@@ -22,6 +22,11 @@ export interface GuardConfig {
   mode: 'pikkumies' | 'standard'
 }
 
+export function resolveStaticDir(env: NodeJS.ProcessEnv, executable = process.execPath, compiled = import.meta.url.includes('$bunfs')): string {
+  if (env.AGENTBOARD_STATIC_DIR) return env.AGENTBOARD_STATIC_DIR
+  return compiled ? path.join(path.dirname(executable), 'dist', 'client') : './dist/client'
+}
+
 export function loadGuardConfig(env: NodeJS.ProcessEnv = process.env): GuardConfig {
   const tokenDir = env.AGENTBOARD_TOKEN_DIR
   const allowedOrigin = env.AGENTBOARD_ALLOWED_ORIGIN
@@ -38,7 +43,7 @@ export function loadGuardConfig(env: NodeJS.ProcessEnv = process.env): GuardConf
     throw new Error('Invalid account launch origins')
   }
   return { tokenDir, allowedOrigin, frameAncestor, launcherUrl,
-    staticDir: env.AGENTBOARD_STATIC_DIR || './dist/client',
+    staticDir: resolveStaticDir(env),
     mode: env.AGENTBOARD_MODE === 'pikkumies' ? 'pikkumies' : 'standard' }
 }
 

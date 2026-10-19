@@ -2356,7 +2356,7 @@ if (persistenceRuntime && !pikkumiesMode) {
   }
 }
 
-const staticDir = process.env.AGENTBOARD_STATIC_DIR || './dist/client'
+const staticDir = accountGuard.config.staticDir
 app.use('/*', serveStatic({ root: staticDir }))
 
 const tlsEnabled = config.tlsCert && config.tlsKey

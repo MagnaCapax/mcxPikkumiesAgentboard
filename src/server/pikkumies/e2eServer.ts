@@ -1,5 +1,5 @@
 /** Isolated Unix-socket server with a TCP forwarder for browser tests. */
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, copyFileSync, cpSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
@@ -30,7 +30,18 @@ delete env.AGENTBOARD_TEST_TCP
 delete env.AGENTBOARD_TEST_AUTH_BYPASS
 const created = Bun.spawnSync(['tmux', 'new-session', '-d', '-s', 'pikkumies', '-n', 'pm1', 'sleep 3600'], { env: env, stdout: 'pipe', stderr: 'pipe' })
 if (created.exitCode !== 0) throw new Error(created.stderr.toString())
-const server = Bun.spawn(['bun', 'src/server/index.ts'], { env, stdout: 'pipe', stderr: 'pipe' })
+let command = ['bun', 'src/server/index.ts']
+if (process.env.AGENTBOARD_E2E_BINARY) {
+  const releaseDir = path.join(root, 'release')
+  mkdirSync(path.join(releaseDir, 'dist'), { recursive: true, mode: 0o700 })
+  const binary = path.join(releaseDir, 'agentboard')
+  copyFileSync(process.env.AGENTBOARD_E2E_BINARY, binary)
+  chmodSync(binary, 0o700)
+  cpSync('dist/client', path.join(releaseDir, 'dist', 'client'), { recursive: true })
+  delete env.AGENTBOARD_STATIC_DIR
+  command = [binary]
+}
+const server = Bun.spawn(command, { env, stdout: 'pipe', stderr: 'pipe' })
 void new Response(server.stdout).text()
 void new Response(server.stderr).text()
 for (let i = 0; i < 100 && !existsSync(socket); i++) await Bun.sleep(100)
