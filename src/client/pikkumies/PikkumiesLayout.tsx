@@ -124,7 +124,7 @@ export default function PikkumiesLayout(props: Props) {
     async function deliver() {
       if (cancelled) return
       setSending(true)
-      setNotice('Sending your message…')
+      setNotice('')
       try {
         const response = await fetch('/api/ask', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -134,19 +134,20 @@ export default function PikkumiesLayout(props: Props) {
         if (cancelled) return
         if (result.accepted) {
           setPending(removePendingAsk(ask.nonce))
+          setSending(false)
           setNotice('')
           return
         }
         if (result.code === 2 || result.code === 5 || result.code === 6) {
-          setNotice(result.code === 2 ? 'Your question will be sent when setup is done.' : 'Sending your message…')
+          setNotice(result.code === 2 ? 'Your question will be sent when setup is done.' : '')
           timer = window.setTimeout(() => { void deliver() }, 5000)
           return
         }
+        setSending(false)
         setNotice(result.code === 3 ? 'Pikkumies needs you in its window first.' :
           result.code === 4 ? 'You are sending messages quickly. Try again in a minute.' :
           'That did not go through. Try again.')
-      } catch { if (!cancelled) setNotice('That did not go through. Try again.') }
-      finally { if (!cancelled) setSending(false) }
+      } catch { if (!cancelled) { setSending(false); setNotice('That did not go through. Try again.') } }
     }
     void deliver()
     return () => { cancelled = true; if (timer) window.clearTimeout(timer); setSending(false) }
@@ -235,7 +236,8 @@ export default function PikkumiesLayout(props: Props) {
     </div>
     {active?.state === 'waiting-for-setup' && <div className="bg-amber-950 px-3 py-2 text-sm text-amber-200">Pikkumies needs you to finish setup in the window below.</div>}
     <div aria-live="polite" className={notice || pending.length ? 'bg-amber-950 px-3 py-2 text-sm text-amber-200' : 'sr-only'}>
-      {pending.length > 0 && <span>Not sent yet: {pending[0]!.text.slice(0, 60)}. </span>}{notice}
+      {pending.length > 0 && <span>Not sent yet: {pending[0]!.text.slice(0, 60)}. </span>}
+      {sending && <span>Sending your message… </span>}{notice}
       {pending.length > 0 && !sending && <button className="ml-2 rounded px-2 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" onClick={() => setSendTick((tick) => tick + 1)}>Send</button>}
     </div>
     <div id="pikkumies-panel" role="tabpanel" aria-label={targetId === 'pm1' ? 'Primary' : `Pikkumies ${targetId.slice(2)}`} className="flex min-h-0 flex-1 flex-col">

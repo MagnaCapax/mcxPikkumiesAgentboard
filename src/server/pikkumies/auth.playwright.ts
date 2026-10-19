@@ -62,8 +62,10 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   }))).toBe(1008)
   const delivered: string[] = []
   await page.route('**/api/ask', async (route) => {
-    delivered.push((route.request().postDataJSON() as { text: string }).text)
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":true,"code":0}' })
+    const text = (route.request().postDataJSON() as { text: string }).text
+    delivered.push(text)
+    const held = text === 'first question' && delivered.filter((item) => item === text).length === 1
+    await route.fulfill({ status: 200, contentType: 'application/json', body: held ? '{"accepted":false,"code":3}' : '{"accepted":true,"code":0}' })
   })
   const sender = await page.context().newPage()
   await sender.goto(base)
@@ -71,7 +73,10 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
     { text: 'first question', nonce: 'a'.repeat(20), ts: Date.now() },
     { text: 'second question', nonce: 'b'.repeat(20), ts: Date.now() },
   ])))
-  await expect.poll(() => delivered).toEqual(['first question', 'second question'])
+  await expect(page.getByText(/Not sent yet: first question/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+  await page.getByRole('button', { name: 'Send' }).click()
+  await expect.poll(() => delivered).toEqual(['first question', 'first question', 'second question'])
   await expect(page.getByText('Not sent yet:')).toHaveCount(0)
   await sender.close()
   await page.screenshot({ path: testInfo.outputPath('pikkumies.png') })
