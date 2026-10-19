@@ -112,6 +112,23 @@ import { StallWatchdog } from './stallWatchdog'
 import { installSyncIoTiming } from './syncIoTiming'
 import { getTailscaleIp } from './tailscale'
 import { windowNameError } from './windowName'
+import { AccountGuard, loadGuardConfig, PIKKUMIES_WS_TYPES } from './pikkumies/guard'
+import { pikkumiesRoutes } from './pikkumies/routes'
+
+const accountSocket = process.env.AGENTBOARD_SOCKET
+const testTcp = process.env.NODE_ENV === 'test' && process.env.AGENTBOARD_TEST_TCP === '1'
+const testAuthBypass = testTcp && process.env.AGENTBOARD_TEST_AUTH_BYPASS === '1'
+if (!accountSocket && !testTcp) throw new Error('AGENTBOARD_SOCKET is required')
+const accountGuard = new AccountGuard(loadGuardConfig(testAuthBypass ? {
+  AGENTBOARD_TOKEN_DIR: '/tmp', AGENTBOARD_ALLOWED_ORIGIN: 'https://panel.example.test',
+  AGENTBOARD_FRAME_ANCESTORS: 'https://panel.example.test',
+  AGENTBOARD_LAUNCHER_URL: 'https://panel.example.test/launch',
+} : process.env))
+const pikkumiesMode = accountGuard.config.mode === 'pikkumies'
+setInterval(() => { if (accountGuard.clientIdleMs >= 30 * 60_000) process.exit(0) }, 60_000).unref?.()
+if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
+  throw new Error('Pikkumies mode requires its tmux session and PTY terminal mode')
+}
 
 function checkPortAvailable(port: number): void {
   let result: ReturnType<typeof Bun.spawnSync>
@@ -471,7 +488,7 @@ function createConnectionId(): string {
     logger.warn('tmux_nested_allowed', { inheritedTmux: nested.inheritedTmux })
   }
 }
-checkPortAvailable(config.port)
+if (testTcp) checkPortAvailable(config.port)
 // Instrument sync fs/sqlite calls: stall samples show the blocked main
 // thread dominated by pread() and JIT'd JS, and no call site is otherwise
 // named. Install before initDatabase — its cached prepared statements must
@@ -503,6 +520,7 @@ logger.info('terminal_mode_resolved', {
 })
 
 const app = new Hono()
+if (pikkumiesMode) app.route('/api', pikkumiesRoutes())
 const db = initDatabase({ exclusive: true })
 const sessionReader = db.db?.filename && db.db.filename !== ':memory:'
   ? new SessionReadClient(db.db.filename)
@@ -606,7 +624,7 @@ const metadataClient = new SessionMetadataClient((record, metadata) => {
 })
 
 function toAgentSession(record: AgentSessionRecord): AgentSession {
-  metadataClient.queue(record)
+  if (!pikkumiesMode) metadataClient.queue(record)
   return { ...buildAgentSession(record, { cachedPrsOnly: true }), ...metadataClient.get(record) }
 }
 // Test adapters may implement SessionDatabase without a SQLite connection.
@@ -635,6 +653,7 @@ function createPersistentWindow(
 }
 
 interface WSData {
+  authenticated: boolean
   terminal: ITerminalProxy | null
   currentSessionId: string | null
   currentTmuxTarget: string | null
@@ -872,7 +891,7 @@ const logPoller = new LogPoller(db, registry, {
 })
 const sessionRefreshWorker = new SessionRefreshWorkerClient()
 const lastUserMessageWorker = new SessionRefreshWorkerClient()
-const ownershipMatcher = config.ownershipMatching ? new OwnershipMatcher({
+const ownershipMatcher = !pikkumiesMode && config.ownershipMatching ? new OwnershipMatcher({
   db,
   windows: () => registry.getAll(),
   missing: result => {
@@ -898,7 +917,7 @@ const ownershipMatcher = config.ownershipMatching ? new OwnershipMatcher({
     refreshSessions()
   },
 }) : null
-const ownershipObserver = config.ownershipObserver || ownershipMatcher ? (() => {
+const ownershipObserver = !pikkumiesMode && (config.ownershipObserver || ownershipMatcher) ? (() => {
   const io = createLocalOwnershipIO({ codexHome: config.codexHomeDir, claudeHome: config.claudeConfigDir })
   return new OwnershipObserver({
     windows: () => registry.getAll(),
@@ -960,7 +979,7 @@ function getDormantRecords() {
 // scan, and in bursts as live links register. Re-queue the dormant rows once
 // per burst; the worker revalidates the logs without blocking this thread.
 let dormantRescanQueued = false
-setCodexSubagentIndexListener(() => {
+if (!pikkumiesMode) setCodexSubagentIndexListener(() => {
   if (dormantRescanQueued) return
   dormantRescanQueued = true
   setTimeout(() => {
@@ -2211,8 +2230,9 @@ app.post('/api/paste-image', async (c) => {
 
     // Generate unique filename in temp directory
     const filename = `paste-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
-    const filepath = `/tmp/${filename}`
+    const filepath = path.join(os.tmpdir(), filename)
     await Bun.write(filepath, image)
+    await fs.chmod(filepath, 0o600)
 
     return c.json({ path: filepath })
   } catch (error) {
@@ -2299,8 +2319,8 @@ if (persistenceRuntime) {
       registry.replaceSessions([stampLocalSession(session), ...others])
     },
   })
-  persistenceRuntime.start()
-  if (persistenceRuntime.health().settings.autoResume) {
+  if (!pikkumiesMode) persistenceRuntime.start()
+  if (!pikkumiesMode && persistenceRuntime.health().settings.autoResume) {
     // Reconcile the new tmux lifetime before selecting interrupted sessions.
     try {
       const live = sessionManager.listWindows()
@@ -2343,14 +2363,20 @@ const tlsOptions = tlsEnabled
   ? { tls: { cert: Bun.file(config.tlsCert), key: Bun.file(config.tlsKey) } }
   : {}
 
-function serverFetch(req: Request, server: Server<WSData>) {
+async function serverFetch(req: Request, server: Server<WSData>) {
   const url = new URL(req.url)
+  if (accountGuard.isUnmounted(url.pathname)) return accountGuard.headers(new Response(null, { status: 404 }), url.pathname)
+  if (url.pathname === '/api/auth') return accountGuard.headers(await accountGuard.exchange(req), url.pathname)
   if (url.pathname === '/ws') {
+    if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') {
+      return accountGuard.headers(new Response(null, { status: 401 }), url.pathname)
+    }
     const requestIp =
       typeof server.requestIP === 'function' ? server.requestIP(req) : null
     if (
       server.upgrade(req, {
         data: {
+          authenticated: false,
           terminal: null,
           currentSessionId: null,
           currentTmuxTarget: null,
@@ -2373,10 +2399,13 @@ function serverFetch(req: Request, server: Server<WSData>) {
     ) {
       return
     }
-    return new Response('WebSocket upgrade failed', { status: 400 })
+    return accountGuard.headers(new Response(null, { status: 400 }), url.pathname)
   }
-
-  return app.fetch(req)
+  if (!testAuthBypass && !accountGuard.isStatic(req.method, url.pathname) && !accountGuard.authorize(req)) {
+    return accountGuard.headers(new Response(null, { status: 401 }), url.pathname)
+  }
+  accountGuard.touch()
+  return accountGuard.headers(await app.fetch(req), url.pathname)
 }
 
 const websocketHandlers = {
@@ -2385,6 +2414,40 @@ const websocketHandlers = {
   perMessageDeflate: true,
   open(ws: ServerWebSocket<WSData>) {
     sockets.add(ws)
+    accountGuard.clientOpened()
+    if (testAuthBypass) { ws.data.authenticated = true; sendInitialState(ws); return }
+    setTimeout(() => { if (!ws.data.authenticated) ws.close(1008) }, 5000)
+  },
+  message(ws: ServerWebSocket<WSData>, message: string | BufferSource) {
+    if (!ws.data.authenticated) {
+      let bearer: unknown
+      try { bearer = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)).bearer } catch { /* rejected below */ }
+      if (typeof bearer !== 'string' || !accountGuard.checkBearer(bearer)) { ws.close(1008); return }
+      ws.data.authenticated = true
+      sendInitialState(ws)
+      return
+    }
+    if (pikkumiesMode) {
+      let value: { type?: unknown; sessionId?: unknown }
+      try { value = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)) } catch { ws.close(1008); return }
+      if (typeof value.type !== 'string' || !PIKKUMIES_WS_TYPES.has(value.type) ||
+          (value.sessionId !== undefined &&
+           !registry.getAll().some((session) => session.id === value.sessionId && /^pm[1-9]$/.test(session.name)))) {
+        ws.close(1008)
+        return
+      }
+    }
+    handleMessage(ws, message)
+  },
+  close(ws: ServerWebSocket<WSData>) {
+    accountGuard.clientClosed()
+    killRateLimiter.forget(ws.data.connectionId)
+    cleanupTerminals(ws)
+    sockets.delete(ws)
+  },
+}
+
+function sendInitialState(ws: ServerWebSocket<WSData>) {
     send(ws, { type: 'sessions', sessions: registry.getAll() })
     send(ws, { type: 'host-status', hosts: hostStatuses })
     send(ws, {
@@ -2404,21 +2467,10 @@ const websocketHandlers = {
       history: agentSessions.history,
     })
     initializePersistentTerminal(ws)
-  },
-  message(ws: ServerWebSocket<WSData>, message: string | BufferSource) {
-    handleMessage(ws, message)
-  },
-  close(ws: ServerWebSocket<WSData>) {
-    killRateLimiter.forget(ws.data.connectionId)
-    cleanupTerminals(ws)
-    sockets.delete(ws)
-  },
 }
 
 Bun.serve<WSData>({
-  port: config.port,
-  hostname: config.hostname,
-  ...tlsOptions,
+  ...(accountSocket ? { unix: accountSocket } : { port: config.port, hostname: config.hostname, ...tlsOptions }),
   fetch: serverFetch,
   websocket: websocketHandlers,
 })
@@ -2426,7 +2478,7 @@ Bun.serve<WSData>({
 const protocol = tlsEnabled ? 'https' : 'http'
 const displayHost = config.hostname === '0.0.0.0' ? 'localhost' : config.hostname
 logger.info('server_started', {
-  url: `${protocol}://${displayHost}:${config.port}`,
+  url: accountSocket ?? `${protocol}://${displayHost}:${config.port}`,
 })
 
 // When bound to localhost, also listen on the Tailscale interface if available.
@@ -2437,6 +2489,7 @@ logger.info('server_started', {
 // tests can wait for it.
 let boundTailscaleIp: string | null = null
 export const tailscaleReady = (async () => {
+  if (accountSocket) return
   if (config.hostname !== '127.0.0.1' && config.hostname !== '0.0.0.0') return
   let detectedIp: string | null
   try {
@@ -2514,7 +2567,7 @@ export const startupReady = (async () => {
   // its first snapshot does synchronous sqlite work that otherwise races the
   // worker-spawn burst during boot.
   await ownershipObserver?.observe()
-  if (config.logPollIntervalMs > 0) {
+  if (!pikkumiesMode && config.logPollIntervalMs > 0) {
     logPoller.start(config.logPollIntervalMs, config.logWatchMode)
   }
   ownershipObserver?.start()
@@ -2844,12 +2897,12 @@ function cleanupTerminals(ws: ServerWebSocket<WSData>) {
 function broadcast(message: ServerMessage) {
   const payload = JSON.stringify(message)
   for (const socket of sockets) {
-    socket.send(payload)
+    if (socket.data.authenticated) socket.send(payload)
   }
 }
 
 function send(ws: ServerWebSocket<WSData>, message: ServerMessage) {
-  ws.send(JSON.stringify(message))
+  if (ws.data.authenticated) ws.send(JSON.stringify(message))
 }
 
 function fireAndForget(promise: Promise<unknown>, context: string): void {

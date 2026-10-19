@@ -34,6 +34,7 @@ import type { ClientMessage, SendClientMessage, ServerMessage, ServerMessageWith
 import type { ConnectionStatus } from '../stores/sessionStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { clientLog } from '../utils/clientLog'
+import { currentBearer } from '../pikkumies/bootstrap'
 
 type MessageListener = (message: ServerMessage) => void
 
@@ -219,6 +220,8 @@ export class WebSocketManager {
         return
       }
       clientLog('ws_onopen', this.wsSnap(), 'info')
+      const bearer = currentBearer()
+      if (bearer) ws.send(JSON.stringify({ bearer }))
       this.clearConnectTimer()
       this.reconnectAttempts = 0
       this.consecutiveFailures = 0

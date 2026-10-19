@@ -49,6 +49,12 @@ mock.module('@xterm/xterm/css/xterm.css', () => ({}))
 mock.module('virtual:pwa-register', () => ({
   registerSW: () => () => {},
 }))
+mock.module('../pikkumies/bootstrap', () => ({
+  bootstrap: async () => true,
+  currentBearer: () => null,
+  currentLaunch: () => null,
+  reconnectFromPanel: () => {},
+}))
 
 const stylesPath = new URL('../styles/index.css', import.meta.url).pathname
 mock.module(stylesPath, () => ({}))
@@ -61,6 +67,7 @@ globalAny.document = {
 describe('main entrypoint', () => {
   test('mounts the app', async () => {
     await import('../main')
+    await Promise.resolve()
     expect(renderCalls).toHaveLength(1)
     expect(renderCalls[0]?.element?.id).toBe('root')
   })

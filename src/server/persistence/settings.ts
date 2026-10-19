@@ -3,7 +3,7 @@ import type { SessionDatabase } from '../db'
 import type { PersistenceSettings } from '../../shared/persistence'
 import { RequestError } from './errors'
 export const defaultPersistenceSettings: PersistenceSettings = {
-  autoResume: false,
+  autoResume: true,
   capturePreviews: false,
 }
 export function getPersistenceSettings(
