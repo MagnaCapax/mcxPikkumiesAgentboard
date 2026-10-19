@@ -240,37 +240,15 @@ class SafeClipboardProvider implements IClipboardProvider {
   constructor(private callbacks: SafeClipboardCallbacks = {}) {}
 
   async readText(selection: ClipboardSelectionType): Promise<string> {
-    if (selection !== 'c') return ''
-    try {
-      return await navigator.clipboard.readText()
-    } catch {
-      return ''
-    }
+    void selection
+    return ''
   }
 
   async writeText(selection: ClipboardSelectionType, text: string): Promise<void> {
     // Only write to system clipboard, and only if there's actual non-whitespace content
     // This prevents OSC 52 sequences from clearing images/rich content from the clipboard
     if (selection !== 'c' || !text?.trim()) return
-    const startedAt = performance.now()
-    try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error('navigator.clipboard.writeText unavailable')
-      }
-      await navigator.clipboard.writeText(text)
-      clientLog('clipboard_write_success', {
-        source: 'osc52',
-        chars: text.length,
-        durationMs: Math.round(performance.now() - startedAt),
-      })
-    } catch (error) {
-      clientLog('clipboard_write_failed', {
-        source: 'osc52',
-        chars: text.length,
-        error: error instanceof Error ? error.message : String(error),
-      }, 'warn')
-      this.callbacks.onWriteFailed?.(text, 'osc52')
-    }
+    this.callbacks.onWriteFailed?.(text, 'osc52')
   }
 }
 import type { ITheme } from '@xterm/xterm'
@@ -759,13 +737,13 @@ export function useTerminal({
         // Fallback for cases where mousedown didn't intercept
         if (event.metaKey || event.ctrlKey) {
           const sanitized = sanitizeLink(text)
-          if (!sanitized) return
+          if (!/^https?:\/\//i.test(sanitized)) return
           window.open(sanitized, '_blank', 'noopener')
         }
       },
       hover: (event: MouseEvent, text: string) => {
         const sanitized = sanitizeLink(text)
-        hoveredLinkUrl = sanitized || null
+        hoveredLinkUrl = /^https?:\/\//i.test(sanitized) ? sanitized : null
         showTooltip(event, text)
       },
       leave: () => {

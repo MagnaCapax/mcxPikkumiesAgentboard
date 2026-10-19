@@ -1,7 +1,7 @@
 /** Account-local launch token exchange and default-deny request guard. */
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { realpathSync, statSync, readdirSync } from 'node:fs'
-import { open, rename, stat, unlink } from 'node:fs/promises'
+import { constants, realpathSync, statSync, readdirSync } from 'node:fs'
+import { open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 
 const MAX_BEARER_AGE_MS = 8 * 60 * 60 * 1000
@@ -118,18 +118,18 @@ export class AccountGuard {
     if (request.method !== 'POST') return new Response(null, { status: 405 })
     let token: unknown
     try { token = (await request.json() as { token?: unknown }).token } catch { return new Response(null, { status: 400 }) }
-    if (typeof token !== 'string' || !/^[a-zA-Z0-9_-]{32,128}$/.test(token)) return new Response(null, { status: 401 })
+    if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) return new Response(null, { status: 401 })
     const file = path.join(this.config.tokenDir, token)
     const claimed = path.join(this.config.tokenDir, `.${token}.used`)
     let ownsClaim = false
     try {
       await rename(file, claimed)
       ownsClaim = true
-      const info = await stat(claimed)
-      if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size > 4096 ||
-          Date.now() - info.mtimeMs > MAX_LAUNCH_AGE_MS) return new Response(null, { status: 401 })
-      const handle = await open(claimed, 'r')
+      const handle = await open(claimed, constants.O_RDONLY | constants.O_NOFOLLOW)
       try {
+        const info = await handle.stat()
+        if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size > 4096 ||
+            Date.now() - info.mtimeMs > MAX_LAUNCH_AGE_MS) return new Response(null, { status: 401 })
         const body = (await handle.readFile('utf8')).trim()
         if (body && body !== token) return new Response(null, { status: 401 })
       } finally { await handle.close() }

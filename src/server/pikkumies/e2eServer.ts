@@ -13,7 +13,7 @@ const socket = path.join(ui, 'ui.sock')
 const tmuxDir = path.join(root, 'tmux')
 const binDir = path.join(root, 'bin')
 for (const dir of [home, ui, tokenDir, temporary, tmuxDir, binDir, path.join(root, 'data')]) mkdirSync(dir, { recursive: true, mode: 0o700 })
-const token = 'e'.repeat(48)
+const token = 'e'.repeat(64)
 writeFileSync(path.join(tokenDir, token), token, { mode: 0o600 })
 writeFileSync(path.join(binDir, 'pikkumies'), '#!/bin/sh\nif [ "$1" = eternal ] && [ "$2" = list ]; then echo \'[{"id":"pm1","state":"running"}]\'; exit 0; fi\nexit 1\n', { mode: 0o700 })
 

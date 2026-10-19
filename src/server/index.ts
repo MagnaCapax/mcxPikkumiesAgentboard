@@ -126,6 +126,9 @@ const accountGuard = new AccountGuard(loadGuardConfig(testAuthBypass ? {
   AGENTBOARD_LAUNCHER_URL: 'https://panel.example.test/launch',
 } : process.env), undefined, () => process.exit(0))
 const pikkumiesMode = accountGuard.config.mode === 'pikkumies'
+if (pikkumiesMode && !testAuthBypass && (!process.env.AGENTBOARD_DATA_DIR || !process.env.TMUX_TMPDIR)) {
+  throw new Error('Pikkumies mode requires private data and tmux directories')
+}
 setInterval(() => { if (accountGuard.clientIdleMs >= 30 * 60_000) process.exit(0) }, 60_000).unref?.()
 if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
   throw new Error('Pikkumies mode requires its tmux session and PTY terminal mode')
@@ -681,6 +684,7 @@ interface WSData {
 }
 
 const sockets = new Set<ServerWebSocket<WSData>>()
+const preAuthSockets = new Set<ServerWebSocket<WSData>>()
 const localHostLabel = config.hostLabel
 const CLIPBOARD_BUFFER_POLL_MS = 750
 const CLIPBOARD_BUFFER_MAX_BYTES = 512 * 1024
@@ -2409,6 +2413,16 @@ async function serverFetch(req: Request, server: Server<WSData>) {
   if (!testAuthBypass && !accountGuard.isStatic(req.method, url.pathname) && !accountGuard.authorize(req)) {
     return accountGuard.headers(new Response(null, { status: 401 }), url.pathname)
   }
+  if (accountGuard.isStatic(req.method, url.pathname) && /^\/assets\/[^/]+-[A-Za-z0-9_-]{8}\.(?:js|css)$/.test(url.pathname)) {
+    const file = path.join(accountGuard.config.staticDir, url.pathname.slice(1))
+    const compressed = Bun.file(`${file}.gz`)
+    const useGzip = req.headers.get('accept-encoding')?.includes('gzip') && await compressed.exists()
+    return accountGuard.headers(new Response(useGzip ? compressed : Bun.file(file), { headers: {
+      'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+      ...(useGzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}),
+    } }), url.pathname)
+  }
   accountGuard.touch()
   return accountGuard.headers(await app.fetch(req), url.pathname)
 }
@@ -2419,8 +2433,9 @@ const websocketHandlers = {
   perMessageDeflate: true,
   open(ws: ServerWebSocket<WSData>) {
     sockets.add(ws)
-    accountGuard.clientOpened()
-    if (testAuthBypass) { ws.data.authenticated = true; sendInitialState(ws); return }
+    if (testAuthBypass) { ws.data.authenticated = true; accountGuard.clientOpened(); sendInitialState(ws); return }
+    if (preAuthSockets.size >= 16) { ws.close(1008); return }
+    preAuthSockets.add(ws)
     setTimeout(() => { if (!ws.data.authenticated) ws.close(1008) }, 5000)
   },
   message(ws: ServerWebSocket<WSData>, message: string | BufferSource) {
@@ -2430,6 +2445,8 @@ const websocketHandlers = {
       try { bearer = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)).bearer } catch { /* rejected below */ }
       if (typeof bearer !== 'string' || !accountGuard.checkBearer(bearer)) { ws.close(1008); return }
       ws.data.authenticated = true
+      preAuthSockets.delete(ws)
+      accountGuard.clientOpened()
       sendInitialState(ws)
       return
     }
@@ -2446,7 +2463,8 @@ const websocketHandlers = {
     handleMessage(ws, message)
   },
   close(ws: ServerWebSocket<WSData>) {
-    accountGuard.clientClosed()
+    preAuthSockets.delete(ws)
+    if (ws.data.authenticated) accountGuard.clientClosed()
     killRateLimiter.forget(ws.data.connectionId)
     cleanupTerminals(ws)
     sockets.delete(ws)

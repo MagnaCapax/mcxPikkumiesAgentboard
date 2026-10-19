@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, writeFile, rm, mkdir, chmod } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir, chmod, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { AccountGuard, loadGuardConfig, resolveStaticDir, validateRuntime } from './guard'
@@ -52,7 +52,7 @@ describe('account guard', () => {
   test('exchanges a token once and enforces response headers', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
     const guard = makeGuard(dir)
-    const token = 'a'.repeat(48)
+    const token = 'a'.repeat(64)
     await writeFile(path.join(dir, token), token, { mode: 0o600 })
     const request = () => new Request('https://local.test/api/auth', { method: 'POST', body: JSON.stringify({ token }) })
     const accepted = await guard.exchange(request())
@@ -70,12 +70,28 @@ describe('account guard', () => {
   test('concurrent exchanges cannot both claim one launch token', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
     const guard = makeGuard(dir)
-    const token = 'b'.repeat(48)
+    const token = 'b'.repeat(64)
     await writeFile(path.join(dir, token), token, { mode: 0o600 })
     const exchange = () => guard.exchange(new Request('https://local.test/api/auth', {
       method: 'POST', body: JSON.stringify({ token }),
     }))
     const statuses = (await Promise.all([exchange(), exchange()])).map((response) => response.status).sort()
     expect(statuses).toEqual([200, 401])
+  })
+
+  test('rejects malformed names before filesystem access and rejects symlinks', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
+    const guard = makeGuard(dir)
+    const exchange = (token: string) => guard.exchange(new Request('https://local.test/api/auth', {
+      method: 'POST', body: JSON.stringify({ token }),
+    }))
+    for (const token of ['z'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), '../outside', 'A'.repeat(64)]) {
+      expect((await exchange(token)).status).toBe(401)
+    }
+    const token = 'c'.repeat(64)
+    const outside = path.join(dir, 'outside')
+    await writeFile(outside, token, { mode: 0o600 })
+    await symlink(outside, path.join(dir, token))
+    expect((await exchange(token)).status).toBe(401)
   })
 })

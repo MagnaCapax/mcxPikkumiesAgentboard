@@ -52,7 +52,6 @@ export function pikkumiesRoutes() {
     try {
       const result = await run(['eternal', 'quit', id])
       if (result.code !== 0) return c.json({ error: 'unavailable' }, 409)
-      await timedSpawnAsync(['tmux', 'kill-window', '-t', `pikkumies:${id}`], { timeout: 5000 })
       return c.json({ ok: true })
     } catch { return c.json({ error: 'unavailable' }, 503) }
   })
