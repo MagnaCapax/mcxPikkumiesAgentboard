@@ -1513,7 +1513,7 @@ export default function Terminal({
         {!simplified && session && <MediaRail session={session} />}
         {!session && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-muted">
-            {simplified ? (connectionStatus === 'connected' ? 'Connecting to Pikkumies...' : 'Reconnecting...') : hibernatingSession ? null : 'Select a session to view terminal'}
+            {simplified ? (connectionStatus === 'connected' || connectionEpoch === 0 ? 'Connecting to Pikkumies...' : 'Reconnecting...') : hibernatingSession ? null : 'Select a session to view terminal'}
           </div>
         )}
         {session && isReadOnly && (

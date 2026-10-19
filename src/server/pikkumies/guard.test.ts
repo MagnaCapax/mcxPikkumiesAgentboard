@@ -62,4 +62,16 @@ describe('account guard', () => {
     expect(response.headers.get('Content-Disposition')).toBe('attachment')
     expect(response.headers.get('Content-Type')).toBe('application/octet-stream')
   })
+
+  test('concurrent exchanges cannot both claim one launch token', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
+    const guard = makeGuard(dir)
+    const token = 'b'.repeat(48)
+    await writeFile(path.join(dir, token), token, { mode: 0o600 })
+    const exchange = () => guard.exchange(new Request('https://local.test/api/auth', {
+      method: 'POST', body: JSON.stringify({ token }),
+    }))
+    const statuses = (await Promise.all([exchange(), exchange()])).map((response) => response.status).sort()
+    expect(statuses).toEqual([200, 401])
+  })
 })

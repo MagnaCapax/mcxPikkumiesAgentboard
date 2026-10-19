@@ -116,8 +116,10 @@ export class AccountGuard {
     if (typeof token !== 'string' || !/^[a-zA-Z0-9_-]{32,128}$/.test(token)) return new Response(null, { status: 401 })
     const file = path.join(this.config.tokenDir, token)
     const claimed = path.join(this.config.tokenDir, `.${token}.used`)
+    let ownsClaim = false
     try {
       await rename(file, claimed)
+      ownsClaim = true
       const info = await stat(claimed)
       if (!info.isFile() || (info.mode & 0o077) !== 0 || info.size > 4096 ||
           Date.now() - info.mtimeMs > MAX_LAUNCH_AGE_MS) return new Response(null, { status: 401 })
@@ -127,7 +129,7 @@ export class AccountGuard {
         if (body && body !== token) return new Response(null, { status: 401 })
       } finally { await handle.close() }
     } catch { return new Response(null, { status: 401 }) }
-    finally { await unlink(claimed).catch(() => {}) }
+    finally { if (ownsClaim) await unlink(claimed).catch(() => {}) }
     if (!this.bearer || Date.now() - this.issuedAt >= MAX_BEARER_AGE_MS) {
       this.bearer = randomBytes(32).toString('base64url')
       this.issuedAt = Date.now()
