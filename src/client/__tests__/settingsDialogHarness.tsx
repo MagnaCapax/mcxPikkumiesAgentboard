@@ -20,6 +20,7 @@ export const globalAny = globalThis as unknown as {
 
 const originalLocalStorage = globalAny.localStorage
 const originalWindow = globalAny.window
+const originalHTMLElement = globalThis.HTMLElement
 const originalFetch = globalThis.fetch
 
 function createStorage(): Storage {
@@ -70,7 +71,10 @@ export function installFetch(handler?: (call: FetchCall) => Response | Promise<R
 }
 
 export function setPhone(isPhone: boolean) {
+  const ElementStub = class {}
+  globalThis.HTMLElement = ElementStub as typeof HTMLElement
   globalAny.window = {
+    HTMLElement: ElementStub,
     matchMedia: () => ({
       matches: isPhone,
       addEventListener: () => {},
@@ -115,6 +119,7 @@ afterEach(() => {
   })
   globalAny.localStorage = originalLocalStorage
   globalAny.window = originalWindow
+  globalThis.HTMLElement = originalHTMLElement
   globalThis.fetch = originalFetch
   useSettingsStore.setState({
     defaultProjectDir: DEFAULT_PROJECT_DIR,

@@ -26,6 +26,8 @@ import { setClientLogLevel } from './utils/clientLog'
 import { getEffectiveModifier, matchesModifier } from './utils/device'
 import { playPermissionSound, playIdleSound, primeAudio, needsUserGesture } from './utils/sound'
 import { applySyncedSettings, initSyncedSettings } from './syncedSettings'
+import { currentLaunch } from './pikkumies/bootstrap'
+import PikkumiesLayout from './pikkumies/PikkumiesLayout'
 
 interface ServerInfo {
   port: number
@@ -642,6 +644,7 @@ export default function App() {
 
   // Auto-select first visible session when current selection is filtered out
   useEffect(() => {
+    if (currentLaunch()?.mode === 'pikkumies') return
     if (!hasLoaded) return
     if (selectedHibernatingSessionId) return
     if (!selectedSessionId) return
@@ -731,6 +734,7 @@ export default function App() {
 
   // Auto-select first session on mobile when sessions load
   useEffect(() => {
+    if (currentLaunch()?.mode === 'pikkumies') return
     const isMobile = window.matchMedia('(max-width: 767px)').matches
     if (
       isMobile &&
@@ -878,6 +882,7 @@ export default function App() {
       }
     }
 
+    if (currentLaunch()?.mode === 'pikkumies') return
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [
@@ -946,7 +951,7 @@ export default function App() {
   // Apply the resolved theme to the document; 'system' follows the OS live
   useEffect(() => initSystemThemeListener(), [])
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
+    document.documentElement.setAttribute('data-theme', currentLaunch()?.mode === 'pikkumies' ? 'dark' : theme)
   }, [theme])
 
   // Fetch server info (including Tailscale IP) on mount
@@ -961,6 +966,12 @@ export default function App() {
     if (!hostLabel) return hostStatuses
     return hostStatuses.filter((hostStatus) => hostStatus.host !== hostLabel)
   }, [hostStatuses, hostLabel])
+
+  if (currentLaunch()?.mode === 'pikkumies') return <PikkumiesLayout
+    sessions={sessions} selectedSessionId={selectedSessionId} selectSession={setSelectedSessionId}
+    connectionStatus={connectionStatus} connectionEpoch={connectionEpoch}
+    sendMessage={sendMessage} subscribe={subscribe}
+  />
 
   return (
     <div className="flex h-full overflow-hidden">

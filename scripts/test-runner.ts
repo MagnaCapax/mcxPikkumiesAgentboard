@@ -146,6 +146,9 @@ async function main() {
         serverTests.push(file)
       }
     }
+    for await (const file of new Bun.Glob('src/server/pikkumies/*.test.ts').scan({ onlyFiles: true })) {
+      serverTests.push(file)
+    }
 
     const clientTests: string[] = []
     const clientGlob = new Bun.Glob('src/client/__tests__/*.test.{ts,tsx}')

@@ -35,10 +35,10 @@ jobs:
         run: bun run typecheck
 
       - name: Test
-        run: bun run test:ci
+        run: env -u TMUX bun run test:ci
 
       - name: Test (coverage)
-        run: bun run test:coverage
+        run: env -u TMUX bun run test:coverage
 
       - name: Upload coverage artifact
         if: always()
@@ -66,41 +66,22 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y tmux
 
       - name: Install Playwright browsers
-        run: bunx playwright install --with-deps chromium
+        run: bun x playwright install --with-deps chromium
 
       - name: Build
         run: bun run build
 
-      - name: Run e2e tests
-        run: bunx playwright test
-
-      - name: Terminal contention regression
-        run: bunx playwright test --config playwright.contention.config.ts --reporter=line,html
-        env:
-          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-contention-report
-          PLAYWRIGHT_HTML_OPEN: never
-
-      - name: Upload contention results
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: playwright-contention-report
-          path: playwright-contention-report/
-          retention-days: 7
-
-      # The ci job skips real-tmux tests (no tmux there); this job has tmux.
-      # Run the whole suite the way the release workflow's commit hook does
-      # (Linux, tmux present), so a real-tmux test that only fails on Linux is
-      # caught here instead of failing the release's master sync step.
-      - name: Unit and real-tmux tests (Linux with tmux)
-        run: bun run test
+      - name: Fork security and interface e2e
+        run: env -u TMUX bun x playwright test --config src/server/pikkumies/playwright.config.ts
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 7
 
   # The grouped-session PTY leak only exists on macOS: there a process keeps

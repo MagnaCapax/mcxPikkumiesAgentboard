@@ -45,6 +45,7 @@ import {
 import { ICON_SIZE, TOUCH_TARGET_CLASS, mobileButtonClass } from './controlStyles'
 
 interface TerminalProps {
+  simplified?: boolean
   session: Session | null
   sessions: Session[]
   /** Unfiltered sessions for the mobile drawer, whose list filters and sorts
@@ -97,6 +98,7 @@ function triggerHaptic() {
 }
 
 export default function Terminal({
+  simplified = false,
   session,
   sessions,
   drawerSessions,
@@ -123,7 +125,8 @@ export default function Terminal({
   error = null,
 }: TerminalProps) {
   void _onClose // Keep for interface compatibility
-  const theme = useResolvedTheme()
+  const resolvedTheme = useResolvedTheme()
+  const theme = simplified ? 'dark' : resolvedTheme
   const terminalTheme = terminalThemes[theme]
   const useWebGL = useSettingsStore((state) => state.useWebGL)
   const fontSize = useSettingsStore((state) => state.fontSize)
@@ -1260,7 +1263,7 @@ export default function Terminal({
 
   return (
     <section
-      className={`flex flex-1 flex-col bg-base terminal-mobile-overlay md:relative md:inset-auto ${isiOS ? 'ios-native-term-selection' : ''}`}
+      className={`flex min-h-0 flex-1 flex-col bg-base ${simplified ? '' : 'terminal-mobile-overlay md:relative md:inset-auto'} ${isiOS ? 'ios-native-term-selection' : ''}`}
       data-testid="terminal-panel"
       onDragOver={(event) => {
         if (!Array.from(event.dataTransfer.types).includes('Files')) return
@@ -1277,7 +1280,7 @@ export default function Terminal({
       }}
     >
       {/* Mobile header - always show on mobile for drawer access */}
-      <div className="flex min-h-[52px] shrink-0 items-center justify-between border-b border-border bg-elevated px-[6px] md:hidden">
+      {!simplified && <div className="flex min-h-[52px] shrink-0 items-center justify-between border-b border-border bg-elevated px-[6px] md:hidden">
         <div className="flex min-w-0 items-center gap-[7px]">
           <button
             onClick={() => setIsDrawerOpen(true)}
@@ -1413,10 +1416,10 @@ export default function Terminal({
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Mobile session switcher - top of terminal */}
-      {session && sessions.length > 1 && (
+      {!simplified && session && sessions.length > 1 && (
         <div className="relative overflow-hidden bg-elevated border-b border-border md:hidden">
 
           {/* Right fade indicator */}
@@ -1471,7 +1474,7 @@ export default function Terminal({
           className="absolute inset-0"
           style={{ backgroundColor: terminalTheme.background }}
         />
-        {isSwitching && session && (
+        {!simplified && isSwitching && session && (
           <div
             role="status"
             aria-live="polite"
@@ -1507,10 +1510,10 @@ export default function Terminal({
             </button>
           </div>
         )}
-        {session && <MediaRail session={session} />}
+        {!simplified && session && <MediaRail session={session} />}
         {!session && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-muted">
-            {hibernatingSession ? null : 'Select a session to view terminal'}
+            {simplified ? (connectionStatus === 'connected' ? 'Connecting to Pikkumies...' : 'Reconnecting...') : hibernatingSession ? null : 'Select a session to view terminal'}
           </div>
         )}
         {session && isReadOnly && (
@@ -1616,7 +1619,7 @@ export default function Terminal({
       <PasteStatus {...browserPaste} />
 
       {/* Desktop status rail (tmux-style status line) */}
-      <SessionRail
+      {!simplified && <SessionRail
         session={session}
         hibernatingSession={hibernatingSession}
         hibernatingDisplayName={hibernatingDisplayName}
@@ -1652,7 +1655,7 @@ export default function Terminal({
         selectionReady={!!pendingClipboardOffer}
         onCopySelection={copyPendingClipboardOffer}
         onDismissSelection={dismissPendingClipboardOffer}
-      />
+      />}
 
       {/* Mobile control strip */}
       {session && (
@@ -1674,7 +1677,7 @@ export default function Terminal({
       )}
 
       {/* Mobile session drawer */}
-      {(isMobileLayout || isiOS) && (
+      {!simplified && (isMobileLayout || isiOS) && (
         <SessionDrawer
           isOpen={isDrawerOpen}
           onClose={() => setIsDrawerOpen(false)}
@@ -1698,7 +1701,7 @@ export default function Terminal({
       )}
 
       {/* Kill session confirmation modal */}
-      {showEndConfirm && session && (
+      {!simplified && showEndConfirm && session && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="mx-4 w-full max-w-sm rounded-lg border border-border bg-elevated p-4 shadow-xl">
             <h3 className="text-base font-medium text-primary mb-2 text-balance">

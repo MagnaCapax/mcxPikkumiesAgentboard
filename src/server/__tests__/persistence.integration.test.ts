@@ -27,7 +27,9 @@ const env = {
   TMUX_SESSION: 'recovery-test',
   AGENTBOARD_STATIC_DIR: 'dist/client',
   AGENTBOARD_SKIP_MATCHING_PATTERNS: '',
-  NODE_ENV: 'production',
+  NODE_ENV: 'test',
+  AGENTBOARD_TEST_TCP: '1',
+  AGENTBOARD_TEST_AUTH_BYPASS: '1',
 }
 for (const key of ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'PI_HOME'] as const)
   fs.mkdirSync(env[key], { recursive: true })
@@ -139,6 +141,7 @@ afterAll(async () => {
 
 test('A/B/C survive backend crashes, tmux replacement, and repeated reopen', async () => {
   await start()
+  await api('/settings', 'PUT', { autoResume: false })
   for (const prefix of ['A', 'B', 'C']) {
     const live = await create(prefix)
     if (prefix === 'A')

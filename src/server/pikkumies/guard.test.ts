@@ -14,7 +14,7 @@ function makeGuard(dir: string) {
     AGENTBOARD_FRAME_ANCESTORS: 'https://panel.example.test',
     AGENTBOARD_LAUNCHER_URL: 'https://panel.example.test/launch',
     AGENTBOARD_MODE: 'pikkumies',
-  }))
+  }), new Set(['/', '/assets/app-123.js']))
 }
 
 describe('account guard', () => {

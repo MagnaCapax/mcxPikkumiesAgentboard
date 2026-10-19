@@ -112,13 +112,14 @@ import { StallWatchdog } from './stallWatchdog'
 import { installSyncIoTiming } from './syncIoTiming'
 import { getTailscaleIp } from './tailscale'
 import { windowNameError } from './windowName'
-import { AccountGuard, loadGuardConfig, PIKKUMIES_WS_TYPES } from './pikkumies/guard'
-import { pikkumiesRoutes } from './pikkumies/routes'
+import { AccountGuard, loadGuardConfig, PIKKUMIES_WS_TYPES, validateRuntime } from './pikkumies/guard'
+import { enforceWindowSizeLatest, pikkumiesRoutes } from './pikkumies/routes'
 
 const accountSocket = process.env.AGENTBOARD_SOCKET
 const testTcp = process.env.NODE_ENV === 'test' && process.env.AGENTBOARD_TEST_TCP === '1'
 const testAuthBypass = testTcp && process.env.AGENTBOARD_TEST_AUTH_BYPASS === '1'
 if (!accountSocket && !testTcp) throw new Error('AGENTBOARD_SOCKET is required')
+if (accountSocket && !testTcp) validateRuntime(process.env, accountSocket)
 const accountGuard = new AccountGuard(loadGuardConfig(testAuthBypass ? {
   AGENTBOARD_TOKEN_DIR: '/tmp', AGENTBOARD_ALLOWED_ORIGIN: 'https://panel.example.test',
   AGENTBOARD_FRAME_ANCESTORS: 'https://panel.example.test',
@@ -827,7 +828,7 @@ function updateHostStatuses(remoteStatuses: HostStatus[]) {
   broadcast({ type: 'host-status', hosts: hostStatuses })
 }
 
-const remotePoller = (config.remoteHosts?.length ?? 0) > 0
+const remotePoller = !pikkumiesMode && (config.remoteHosts?.length ?? 0) > 0
   ? new RemoteSessionPoller({
       hosts: config.remoteHosts,
       pollIntervalMs: config.remotePollMs,
@@ -2301,7 +2302,7 @@ app.get('/api/clipboard-file-path', async (c) => {
   }
 })
 
-if (persistenceRuntime) {
+if (persistenceRuntime && !pikkumiesMode) {
   persistenceRuntime.matchingFailure = () => logPoller.matchingError
   const library = registerPersistenceRoutes(app, persistenceRuntime, {
     metadataFor: (record) => metadataClient.scan(record),
@@ -2375,6 +2376,10 @@ async function serverFetch(req: Request, server: Server<WSData>) {
       typeof server.requestIP === 'function' ? server.requestIP(req) : null
     if (
       server.upgrade(req, {
+        headers: {
+          'Content-Security-Policy': `frame-ancestors ${accountGuard.config.frameAncestor}`,
+          'X-Frame-Options': `ALLOW-FROM ${accountGuard.config.frameAncestor}`,
+        },
         data: {
           authenticated: false,
           terminal: null,
@@ -2549,6 +2554,7 @@ export const startupReady = (async () => {
       message: error instanceof Error ? error.message : String(error),
     })
   }
+  if (pikkumiesMode) await enforceWindowSizeLatest().catch(() => {})
   const startupWindows = registry.getAll().filter((s) => !s.remote)
   logger.info('startup_state', {
     activeSessionCount: startupActiveSessions.length,
