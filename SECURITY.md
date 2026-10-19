@@ -2,10 +2,10 @@
 
 ## Reporting Security Issues
 
-We take the security of Agentboard seriously. If you believe you have found a security vulnerability, please report it to us privately. **Please do not report security vulnerabilities through public GitHub issues, discussions, or pull requests.**
+If you believe you have found a security vulnerability in this fork, report it privately. **Do not report undisclosed vulnerabilities through public GitHub issues, discussions, or pull requests.**
 
 Instead, please report them via:
-- [GitHub Security Advisory](https://github.com/gbasin/agentboard/security/advisories/new)
+- [Fork GitHub Security Advisory](https://github.com/MagnaCapax/mcxPikkumiesAgentboard/security/advisories/new)
 
 ### Reporting Process
 1. **Submit Report**: Use the above channel to submit your report
@@ -24,14 +24,14 @@ Instead, please report them via:
 
 | Version | Supported |
 |---------|-----------|
+| Latest fork release | Yes |
 | Latest commit on the default branch | Yes |
-| Latest published npm package (`@gbasin/agentboard`) | Yes |
 | All other versions | No |
 
 
 ## Security Considerations
 
-Agentboard provides a web-based interface to tmux terminal sessions. By design, it grants terminal access to connected clients.
+This fork provides a web-based interface to tmux terminal sessions. By design, a valid bearer grants terminal access as the account user. Run it only behind the account launcher and reverse proxy described in the README. The process refuses production TCP listeners.
 
 ---
 Last updated: February 2026

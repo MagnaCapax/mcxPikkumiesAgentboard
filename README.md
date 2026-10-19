@@ -1,288 +1,53 @@
-# Agentboard
+# Pikkumies Agentboard
 
-[![CI](https://img.shields.io/github/actions/workflow/status/gbasin/agentboard/ci.yml?branch=master&logo=github)](https://github.com/gbasin/agentboard/actions)
-[![npm](https://img.shields.io/npm/v/@gbasin/agentboard?logo=npm)](https://www.npmjs.com/package/@gbasin/agentboard)
-[![License: MIT](https://img.shields.io/github/license/gbasin/agentboard)](https://github.com/gbasin/agentboard/blob/master/LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/gbasin/agentboard)
+A public MIT fork of [Agentboard](https://github.com/gbasin/agentboard). **Upstream base v0.36.0 (2dc3fd8).** Agentboard's React terminal, tmux integration, and mobile terminal controls remain the foundation. See [LICENSE](LICENSE) for the upstream copyright notice.
 
-Agentboard is a Web GUI for `tmux` that's optimized for agent TUI's (`claude`, `codex`, etc). A lighter-weight, agent-optimized alternative to Blink, Termux, etc.
+This fork runs behind an account launcher and reverse proxy. It has two process modes: `AGENTBOARD_MODE=pikkumies` for the simplified Pikkumies tab and standard mode for the full Agentboard interface. Each account gets a separate process and Unix socket for each mode. The launcher and welcome bar are supplied by the host integration; they are not served by this repository.
 
-Run your desktop/server, then connect from your phone or laptop over Tailscale/LAN. You get a shared workspace across devices.
+## Launch contract
 
-- iOS Safari mobile experience with:
-  - Paste support (including images)
-  - Touch scrolling, tap-to-click, and long-press selection in fullscreen Claude Code sessions
-  - Mobile-friendly copy prompts when browser clipboard writes need a user gesture
-  - Virtual arrow keys / d-pad
-  - Quick keys toolbar (ctrl, esc, etc.)
-- Claude Code fullscreen renderer support by default, with mouse scrolling, click handling, in-app selection, and clipboard forwarding through the browser terminal
-- Out-of-the-box log tracking and matching for Claude, Codex, and Pi — auto-matches sessions to active tmux windows, with one-click Wake for Hibernating and History sessions.
-- Shows the last user prompt for each session, so you can remember what each agent is working on
-- Hibernate sessions to close their tmux window while keeping them visible across restarts for manual Wake
+The process requires `AGENTBOARD_SOCKET` and refuses a TCP listener in production. The launch environment provides `AGENTBOARD_TOKEN_DIR`, `AGENTBOARD_LAUNCHER_URL`, `AGENTBOARD_ALLOWED_ORIGIN`, `AGENTBOARD_FRAME_ANCESTORS`, and a private `TMPDIR` inside the account home. Pikkumies mode also requires `TMUX_SESSION=pikkumies` and `TERMINAL_MODE=pty`. The account launcher starts it with a private socket and token directory, then opens the iframe with a one-use token in the URL fragment.
 
-## How It Works
+The UI strips the fragment, exchanges the token at `POST /api/auth`, and keeps the returned bearer only in memory. The bearer lasts until the process exits, subject to an eight-hour absolute cap. Every non-static HTTP request checks it. A WebSocket sends no server frames until its first client frame carries the bearer; subsequent frames are restricted to the reviewed message list. The guard applies to both modes. There are no auth cookies or `Set-Cookie` responses. Every HTTP response has a configured `frame-ancestors` policy and an `X-Frame-Options` fallback. An open WebSocket counts as a client; the process exits after 30 minutes without clients.
 
-```
-┌─────────────┐    SSH     ┌─────────────┐
-│ Remote Host ├───────────►│             │   WebSocket   ┌────────────┐
-│ (tmux)      │            │  Agentboard ├──────────────►│  Browser   │
-└─────────────┘    tmux    │  Server     │               │  (React +  │
-┌─────────────┐    CLI     │             │               │  xterm.js) │
-│ Local tmux  ├───────────►│  - discover │               └────────────┘
-│ sessions    │            │    sessions │
-└─────────────┘            │  - parse    │
-┌─────────────┐    read    │    agent    │
-│ Agent logs  ├───────────►│    logs     │
-│ ~/.claude/  │            └─────────────┘
-└─────────────┘
-```
+The account's local state is under `~/.mcxPikkumies/pikkumies/local`. The simplified process uses `local/ui/ui.sock`, `local/ui/tokens/` and `local/ui/tmp/`; the launcher creates the directories with mode `0700` and token files with mode `0600`. The UI writes pasted images to its private temporary directory with mode `0600`.
 
-- **Session discovery** — polls local tmux windows and (optionally) remote hosts over SSH
-- **Status inference** — reads pane content and Claude/Codex JSONL logs to determine if each agent is *working*, *waiting for input*, or *asking for permission*
-- **Live terminal** — streams I/O through the server so you can interact with any session from any device
-- **Hibernating and History sessions** — keeps dormant agent sessions in the sidebar and wakes them on demand; startup does not auto-wake dormant sessions
+## Changes from upstream
 
-### Desktop
-| Terminal | Sessions | Hibernating |
-| :---: | :---: | :---: |
-| <img src="assets/desktop.png" alt="Terminal" height="400"/> | <img src="assets/sessions.png" alt="Sessions" height="400"/> | <img src="assets/pins.png" alt="Hibernating" height="400"/> |
+| Area | Fork behavior |
+| --- | --- |
+| Listener and auth | One Unix socket; token fragment exchange; in-memory bearer on API and WebSocket requests; no production TCP or Tailscale listener. The upstream TCP/Tailscale code remains behind the unreachable production branch to ease tag merges. |
+| Simplified UI | One 44 px dark strip with pinned Primary, fixed Pikkumies 2–9 tabs, five-second Eternal state polling, direct New action, and a close confirmation that quits the Eternal before killing its window. `?session=pmN` selects a tab. No full-interface button appears in this strip; the host panel owns that action. |
+| Eternal and ask API | `GET/POST /api/eternals`, `POST /api/eternals/:id/quit`, and `POST /api/ask` run the account command with an explicit sanitized environment. Pending asks are read once from same-origin local storage for up to 60 minutes, deduplicated by nonce, and retried on setup or Primary-starting responses while the tab is open. The welcome bar stores the ask and switches tabs; it is outside this repository. |
+| Background work | Simplified mode does not start transcript polling, ownership matching, metadata scans, PR lookups, or persistence maintenance. Its file, media, directory, preview, PR, and client-log routes return 404. |
+| Standard mode | Keeps the full Agentboard interface with the same guard and Unix socket. Automatic session resume defaults on. Account-controlled file responses are attachments with `nosniff` and CSP sandbox. Existing Hermes windows in the full interface are not auto-resumed. |
+| Release | Upstream release-please, npm platform packages, npm publishing, and Homebrew publishing are removed. CI builds a Linux x64 binary and SHA-256 checksum as artifacts. Fork releases attach the prebuilt binary and checksum to GitHub Releases; they do not publish npm packages. |
 
-### Mobile
-| Terminal | Controls |
-| :---: | :---: |
-| <img src="assets/mobile.jpeg" alt="Terminal" height="400"/> | <img src="assets/mobile-controls.jpeg" alt="Controls" height="400"/> |
+### Controls omitted from simplified mode
 
-## Requirements
+| Upstream control | Simplified mode |
+| --- | --- |
+| Sidebar, mobile drawer, session rail, resize handle | Replaced by the fixed Eternal strip |
+| Host and project badges, filters, sort, drag reorder, context menu | Hidden |
+| New-session modal, shell button, settings, directory browser | Hidden |
+| History, recovery, hibernating sections, wake, move to history | Hidden |
+| PR chips, media rail, preview | Hidden and their server routes are unmounted |
+| Terminal, phone arrow and number controls, paste status | Kept |
 
-- tmux (`brew install tmux` / `apt install tmux`)
-- [Tailscale](https://tailscale.com/download) (recommended) or any network path to your machine
+## Development and checks
 
-## Install
-
-### Homebrew
-
-```bash
-brew tap gbasin/tap
-brew install agentboard
-agentboard
-```
-
-### npm
-
-```bash
-npm install -g @gbasin/agentboard
-agentboard
-```
-
-Or run directly:
-
-```bash
-npx @gbasin/agentboard
-```
-
-Then open `http://localhost:4040` (or `http://<your-machine>:4040` from another device).
-
-For persistent deployment, see [systemd/README.md](systemd/README.md) (Linux) or [launchd/README.md](launchd/README.md) (macOS).
-
-### From source
-
-Requires **Bun 1.3.14+** (see [Troubleshooting](#troubleshooting)).
+Requires Bun 1.x, tmux, and the project dependencies. Build with `bun run build`. A direct `bun run start` requires the launch environment above. Use a private tmux socket and data directory for local tests; never run an extra server against a live tmux session.
 
 ```bash
 bun install
-bun run dev
+bun run lint
+bun run typecheck
+env -u TMUX bun test
+env -u TMUX bun x playwright test --config src/server/pikkumies/playwright.config.ts
 ```
 
-Open `http://<your-machine>:5173` (Vite dev server). In production, UI is served from the backend port (default 4040).
+The Playwright test starts a private tmux server and a Unix-socket backend, forwards it to a local test port, and checks fragment stripping, denied routes, response headers, and the simplified strip. FAD parity fixtures are generated by `bun run scripts/regen-fad-fixtures.ts` and require Cargo; the shim is for development only.
 
-Production:
+## Upstream merge policy
 
-```bash
-bun run build
-bun run start
-```
-
-For persistent deployment, see [systemd/README.md](systemd/README.md) (Linux) or [launchd/README.md](launchd/README.md) (macOS).
-
-## Dependency Risk Scanner
-
-Use the built-in scanner to report security and maintenance risk for direct dependencies:
-
-```bash
-bun run deps:risk
-```
-
-Machine-readable output:
-
-```bash
-bun run deps:risk:json
-```
-
-Policy:
-
-- Security risk comes from `bun audit --json` findings and is aggregated by severity (`low`, `moderate`, `high`, `critical`).
-- Maintenance risk comes from `bun outdated` and classifies version lag as `major`, `minor`, or `patch` behind latest.
-- Local default threshold is `high` (`high` + `critical` fail).
-- CI enforces security threshold breaches at `critical` only (`bun run deps:risk:ci`) while existing upstream `high` advisories are tracked; maintenance findings are warnings for prioritization.
-
-You can override the security threshold with `--threshold` (or `DEPENDENCY_RISK_FAIL_ON`):
-
-```bash
-bun run deps:risk -- --threshold moderate
-```
-
-## Session recovery
-
-**Session recovery** keeps session names, projects, launch details, and earlier runs across restarts. New sessions are saved before their terminal starts, including shells and agents that have not written a conversation log yet.
-
-- Review interrupted sessions and reopen them from the recovery panel.
-- Hibernate or archive sessions without deleting their saved metadata.
-
-Automatic reopening is off by default. A reboot stops the underlying processes; reopening resumes supported conversations or launches a fresh shell. See the [recovery guide](docs/session-recovery.md) for defaults and limits.
-
-## Keyboard Shortcuts
-
-| Action | Mac | Windows/Linux |
-|--------|-----|---------------|
-| Previous session | `Ctrl+Option+[` | `Ctrl+Shift+[` |
-| Next session | `Ctrl+Option+]` | `Ctrl+Shift+]` |
-| Jump to session 1-9 | `Ctrl+Option+1..9` | `Ctrl+Shift+1..9` |
-| New session | `Ctrl+Option+N` | `Ctrl+Shift+N` |
-| Kill session | `Ctrl+Option+X` | `Ctrl+Shift+X` |
-
-## Environment
-
-```
-PORT=4040
-HOSTNAME=127.0.0.1
-TMUX_SESSION=agentboard
-REFRESH_INTERVAL_MS=5000
-DISCOVER_PREFIXES=work,external
-ALLOW_KILL_EXTERNAL=false
-PRUNE_WS_SESSIONS=true
-AGENTBOARD_PREFER_WINDOW_NAME=false
-TERMINAL_MODE=pty
-AGENTBOARD_CLAUDE_NO_FLICKER=true
-AGENTBOARD_TMUX_SET_CLIPBOARD=true
-AGENTBOARD_TMUX_SYNC=true
-TERMINAL_MONITOR_TARGETS=true
-VITE_ALLOWED_HOSTS=nuc,myserver
-AGENTBOARD_DB_PATH=~/.agentboard/agentboard.db
-AGENTBOARD_INACTIVE_MAX_AGE_HOURS=24
-AGENTBOARD_EXCLUDE_PROJECTS=<empty>,/workspace
-AGENTBOARD_HOST=blade
-AGENTBOARD_REMOTE_HOSTS=mba,carbon,worm
-AGENTBOARD_REMOTE_POLL_MS=2000
-AGENTBOARD_REMOTE_TIMEOUT_MS=4000
-AGENTBOARD_REMOTE_STALE_MS=45000
-AGENTBOARD_REMOTE_SSH_OPTS=-o BatchMode=yes -o ConnectTimeout=3
-AGENTBOARD_REMOTE_ALLOW_ATTACH=false
-AGENTBOARD_REMOTE_ALLOW_CONTROL=false
-AGENTBOARD_LOG_WATCH_MODE=watch
-AGENTBOARD_PASTE_IMAGE_MAX_BYTES=41943040
-```
-
-`HOSTNAME` controls which interfaces the server binds to (default `127.0.0.1` for localhost-only). With the default localhost binding, if Tailscale is detected the server also binds to your Tailscale IP automatically. Set to `0.0.0.0` to listen on all interfaces. A `HOSTNAME` that merely equals the machine hostname is treated as auto-exported by the environment (containers and some CI images do this) and ignored with a warning, keeping the localhost default.
-
-> **Security note:** Agentboard has no built-in authentication. Anyone who can reach the server has full access to your terminal sessions, including the ability to run commands as your user. The default localhost binding is safe. Tailscale provides network-level auth for remote access. Avoid setting `HOSTNAME=0.0.0.0` on untrusted networks (public WiFi, shared LANs) without an additional access control layer.
-
-`DISCOVER_PREFIXES` lets you discover and control windows from other tmux sessions. If unset, all sessions except the managed one are discovered. Windows named `__agentboard_root__` are always hidden — that name is reserved for the placeholder that keeps a base session alive.
-
-`ALLOW_KILL_EXTERNAL` (default `false`) controls whether externally-discovered sessions can be killed from the UI. Set to `true` to allow it.
-
-`PRUNE_WS_SESSIONS` removes orphaned `agentboard-ws-*` tmux sessions on startup (set to `false` to disable).
-
-`AGENTBOARD_PREFER_WINDOW_NAME` (default `false`) controls how externally-discovered sessions are labeled. When `false`, the tmux session name is used (more meaningful than auto-renamed window names that follow the running process under tmux `automatic-rename on`). Set to `true` to use the tmux window name when it is non-empty and distinct from the session name — useful when you keep one shared session (e.g. `dev`) with one explicitly-named window per project (`myapp`, `infra`, ...).
-
-`TERMINAL_MODE` selects terminal I/O strategy: `pty` (default, grouped session) or `pipe-pane` (PTY-less, works in daemon/systemd/docker without `-t`).
-
-`AGENTBOARD_CLAUDE_NO_FLICKER` controls how Agentboard launches new Claude Code windows. By default, Agentboard sets `CLAUDE_CODE_NO_FLICKER=1` on newly-created panes so Claude uses its fullscreen renderer with mouse scrolling, click handling, in-app selection, and flat memory usage for long conversations. Set `AGENTBOARD_CLAUDE_NO_FLICKER=0` (or `false`) before starting Agentboard to launch Claude without that env var. Fullscreen rendering requires Claude Code v2.1.89 or later; older Claude Code versions should ignore the env var and use the classic renderer.
-
-Reasons to opt out: fullscreen rendering keeps the conversation in the alternate screen buffer instead of native terminal scrollback, so terminal-level search/copy workflows behave differently; Claude also captures mouse events unless you disable its mouse capture. Inside Claude Code, run `/tui default` to switch a session back to the classic renderer, or launch Claude with `CLAUDE_CODE_DISABLE_MOUSE=1` if you want fullscreen rendering but native mouse selection.
-
-`AGENTBOARD_TMUX_SET_CLIPBOARD` controls whether Agentboard enables tmux's `set-clipboard on` when it attaches. By default it does, so copies made inside a session land in a tmux paste buffer that Agentboard can relay to the browser clipboard (important on iOS Safari, where the async OSC 52 path can't satisfy the user-gesture rule). Because `set-clipboard` is a server-global tmux option, this affects your whole tmux server and is not reverted on disconnect — set `AGENTBOARD_TMUX_SET_CLIPBOARD=0` (or `false`) to leave your tmux configuration untouched.
-
-`AGENTBOARD_TMUX_SYNC` controls whether Agentboard's tmux client advertises synchronized-update support (`tmux -T sync`, tmux 3.2+). By default it does, so tmux wraps redraws in DEC 2026 frame markers and the browser terminal paints each frame atomically instead of tearing during fast fullscreen repaints (e.g. Claude Code's no-flicker renderer). The flag applies only to Agentboard's own client and does not change tmux server options. Set `AGENTBOARD_TMUX_SYNC=0` (or `false`) to disable.
-
-When you open an externally-discovered tmux session, Agentboard attaches through a per-connection session grouped with it (`agentboard-ws-<connection>-x-<session>-<hash>`), so focus in the browser stays independent of your own tmux clients. Two side effects: these derived sessions appear in `tmux ls` while a viewer is attached (they are removed on switch-away and disconnect, and pruned at startup), and killing the raw session keeps its windows alive until the last grouped viewer switches away (tmux keeps a group's windows while any member session exists).
-
-`TERMINAL_MONITOR_TARGETS` (pipe-pane only) polls tmux to detect closed targets (set to `false` to disable).
-
-`VITE_ALLOWED_HOSTS` allows access to the Vite dev server from other hostnames. Useful with Tailscale MagicDNS - add your machine name (e.g., `nuc`) to access the dev server at `http://nuc:5173` from other devices on your tailnet.
-
-All persistent data is stored in `~/.agentboard/`: session database (`agentboard.db`) and logs (`agentboard.log`). Override paths with `AGENTBOARD_DB_PATH` and `LOG_FILE`.
-
-`AGENTBOARD_INACTIVE_MAX_AGE_HOURS` controls the sidebar lookback (default: 24 hours, up to 100 recent entries). The env var name is kept for compatibility.
-
-`AGENTBOARD_EXCLUDE_PROJECTS` filters out sessions from specific project directories (comma-separated). Use `<empty>` to exclude sessions with no project path. Useful for hiding automated/spam sessions.
-
-`AGENTBOARD_SKIP_MATCHING_PATTERNS` controls which orphan sessions skip expensive window matching (comma-separated). Defaults: `<codex-exec>` (headless Codex exec sessions), `/private/tmp/*`, `/private/var/folders/*`, `/var/folders/*`, `/tmp/*`. Patterns support trailing `*` for prefix matching. Set to empty string to disable skip matching entirely.
-
-`AGENTBOARD_HOST` sets the host label for local sessions (default: `hostname`).
-
-`AGENTBOARD_REMOTE_HOSTS` enables remote tmux polling over SSH. Provide a comma-separated list of hosts (e.g., `mba,carbon,worm`). Remote sessions show live status (working/waiting/permission) via pane content capture over SSH.
-
-`AGENTBOARD_REMOTE_POLL_MS`, `AGENTBOARD_REMOTE_TIMEOUT_MS`, and `AGENTBOARD_REMOTE_STALE_MS` control remote poll cadence, SSH timeout, and stale host cutoff.
-
-`AGENTBOARD_REMOTE_SSH_OPTS` appends extra SSH options (space-separated).
-
-`AGENTBOARD_REMOTE_ALLOW_ATTACH` enables interactive terminal attach to remote sessions (input, resize, copy-mode). When `false` (default), remote sessions are view-only.
-
-`AGENTBOARD_REMOTE_ALLOW_CONTROL` enables destructive remote session management (create, kill, rename) via the UI. Setting this to `true` implies `REMOTE_ALLOW_ATTACH=true`. Kill and rename are restricted to agentboard-managed sessions — externally-discovered remote sessions cannot be killed or renamed even with control enabled.
-
-`AGENTBOARD_LOG_WATCH_MODE` selects the log detection strategy: `watch` (default) uses `fs.watch` for instant file-change detection, `poll` falls back to periodic directory scanning. Use `poll` if you experience issues with filesystem notifications (e.g., on network-mounted home directories). On Linux, watch mode automatically includes a 15-second fallback poll since `fs.watch({ recursive: true })` has known platform bugs.
-
-`AGENTBOARD_OWNERSHIP_OBSERVER=true` enables read-only ownership diagnostics for local Claude and Codex sessions. It checks at startup and every 30 seconds. The diagnostics flag defaults to off. For read-only observation on macOS, also set `AGENTBOARD_OWNERSHIP_MATCHING=false`. Changed results appear as `ownership_observation` log events with `agree`, `unmatched`, `disagree`, or `unresolved` comparisons. Set `LOG_LEVEL=debug` to include per-cycle counts and duration.
-
-Ownership-based matching is enabled by default on macOS. Set `AGENTBOARD_OWNERSHIP_MATCHING=false` to opt out. Matching also enables the observer. Confirmed ownership takes precedence over scrollback, name, and slug matching. It can match idle sessions and switch a window to a different known conversation atomically. It never steals a conversation from another window or changes a session with a pending stop/wake. Inspection failures preserve existing associations. Other agents keep the existing matching behavior.
-
-A conversation must first enter the log database. Missing Codex transcripts are queued directly for discovery; Claude uses the normal transcript discovery pipeline. A later ownership check binds the discovered conversation (checks run every 30 seconds). The flag has no effect on Linux until live validation is complete. Set `AGENTBOARD_OWNERSHIP_MATCHING=false` and restart to return to the existing matcher; already matched sessions remain in the database. No agent configuration changes are required.
-
-Claude identity comes from its local PID registry, checked against the running process. Codex identity comes from writable root transcripts and open writer-lock descriptors. Shared-daemon Codex sessions, ambiguous roots, and unsupported registry formats remain unresolved. These readers use internal agent formats. Live validation currently covers macOS; Linux needs live validation before enabling ownership writes.
-
-To compare a running instance once from a source checkout, supply its socket and API address:
-
-```bash
-bun scripts/observe-session-ownership.ts --socket /private/tmp/tmux-501/default --api http://127.0.0.1:4040
-```
-
-Replace the socket path with the instance's actual tmux socket. This command reads process metadata and session headers. It sends no terminal input and makes no API writes. Use `--claude-home` or `--codex-home` for nondefault agent directories. The observer requires `ps`, `tmux`, and, for Codex, `lsof`.
-
-Paste text or files directly into the terminal prompt. Desktop clipboard paste and file drops upload device files and insert their paths without pressing Enter. On mobile, **Paste** opens a dialog with a field for native clipboard paste and **Choose files** for selecting one or more files. File uploads accept any extension, up to 40 MB per file. Files are stored temporarily on the Agentboard host; uploads are unavailable for SSH sessions.
-
-The mobile dialog works the same over HTTP and HTTPS. Touch and hold in the field to paste, or select **Choose files**. Either action inserts directly into the existing terminal prompt without submitting it. Automatic clipboard reads elsewhere depend on browser support and permission and require HTTPS or localhost.
-
-`AGENTBOARD_PASTE_IMAGE_MAX_BYTES` caps clipboard image uploads (default 40 MB, enough for full-resolution photos pasted as PNG). Image attachments support PNG, JPEG, GIF, and WebP.
-
-**SSH multiplexing (recommended):** Each poll cycle opens SSH connections to every remote host. Enable SSH connection multiplexing to reuse connections and reduce overhead from ~200-500ms to ~5ms per poll. Add to your `~/.ssh/config`:
-
-```
-Host *
-    ControlMaster auto
-    ControlPath ~/.ssh/sockets/%r@%h-%p
-    ControlPersist 600
-```
-
-Then create the sockets directory: `mkdir -p ~/.ssh/sockets && chmod 700 ~/.ssh/sockets`
-
-## Logging
-
-```
-LOG_LEVEL=info                          # debug | info | warn | error (default: info)
-LOG_FILE=~/.agentboard/agentboard.log   # default; set empty to disable file logging
-```
-
-Console output is pretty-printed in development, JSON in production (`NODE_ENV=production`). File output is always JSON. Set `LOG_FILE=` (empty) to disable file logging.
-
-## Troubleshooting
-
-### "open terminal failed: not a terminal" errors
-
-If you see infinite `open terminal failed: not a terminal` errors, you need to upgrade Bun:
-
-```bash
-bun upgrade
-```
-
-**Root cause**: Bun versions prior to 1.3.6 had a bug where the `terminal` option in `Bun.spawn()` incorrectly set stdin to `/dev/null` instead of the PTY. Since `tmux attach` requires stdin to be a terminal, it fails immediately. This was fixed in Bun 1.3.6.
+Merge **upstream release tags only**, never upstream `master`. Run `src/server/pikkumies/invariants.test.ts` first after every merge. It inventories registered HTTP routes and WebSocket client message types; an unknown entry fails the check until its allow or deny disposition is reviewed. Review any upstream security fix, open a tracking issue after public disclosure, and merge the fixed release tag. Upstream's [security policy](https://github.com/gbasin/agentboard/blob/master/SECURITY.md) supports only its latest release. Conflicts in the deleted upstream publishing workflow and npm package files are expected.

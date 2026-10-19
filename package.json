@@ -1,21 +1,14 @@
 {
-  "name": "@gbasin/agentboard",
+  "name": "pikkumies-agentboard",
+  "private": true,
   "version": "0.36.0",
   "type": "module",
-  "description": "Web GUI for tmux optimized for AI agent TUIs",
-  "author": "gbasin",
+  "description": "Account-local tmux terminal interface",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gbasin/agentboard.git"
+    "url": "git+https://github.com/MagnaCapax/mcxPikkumiesAgentboard.git"
   },
-  "bin": {
-    "agentboard": "./bin/agentboard"
-  },
-  "files": [
-    "bin/**/*",
-    "README.md"
-  ],
   "engines": {
     "bun": ">=1.3.14"
   },
