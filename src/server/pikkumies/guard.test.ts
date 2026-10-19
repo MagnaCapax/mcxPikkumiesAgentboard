@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, writeFile, rm, mkdir, chmod, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { AccountGuard, loadGuardConfig, resolveStaticDir, validateRuntime } from './guard'
+import { AccountGuard, allowsPikkumiesMessage, loadGuardConfig, resolveStaticDir, validateRuntime } from './guard'
 
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
@@ -18,6 +18,14 @@ function makeGuard(dir: string) {
 }
 
 describe('account guard', () => {
+  test('terminal frames cannot choose another tmux window', () => {
+    const sessions = [{ id: 'one', name: 'pm1', tmuxWindow: 'pikkumies:0' }]
+    expect(allowsPikkumiesMessage({ type: 'terminal-attach', sessionId: 'one' }, sessions)).toBe(true)
+    expect(allowsPikkumiesMessage({ type: 'terminal-attach', sessionId: 'one', tmuxTarget: 'other:0' }, sessions)).toBe(false)
+    expect(allowsPikkumiesMessage({ type: 'session-kill', sessionId: 'one' }, sessions)).toBe(false)
+    expect(allowsPikkumiesMessage({ type: 'terminal-input', sessionId: 'other' }, sessions)).toBe(false)
+    expect(allowsPikkumiesMessage({ type: 'terminal-input', sessionId: 'one' }, [{ ...sessions[0]!, tmuxWindow: 'other:0' }])).toBe(false)
+  })
   test('compiled binaries load frontend files next to the executable', () => {
     expect(resolveStaticDir({}, '/opt/board/agentboard', true)).toBe('/opt/board/dist/client')
     expect(resolveStaticDir({ AGENTBOARD_STATIC_DIR: '/another/root' }, '/opt/board/agentboard', true)).toBe('/another/root')
@@ -27,9 +35,13 @@ describe('account guard', () => {
     const ui = path.join(home, 'ui')
     const temporary = path.join(ui, 'tmp')
     const tokens = path.join(ui, 'tokens')
+    const data = path.join(ui, 'data')
+    const tmux = path.join(ui, 'tmux')
     await mkdir(temporary, { recursive: true, mode: 0o700 })
     await mkdir(tokens, { mode: 0o700 })
-    const env = { HOME: home, TMPDIR: temporary, AGENTBOARD_TOKEN_DIR: tokens }
+    await mkdir(data, { mode: 0o700 })
+    await mkdir(tmux, { mode: 0o700 })
+    const env = { HOME: home, TMPDIR: temporary, AGENTBOARD_TOKEN_DIR: tokens, AGENTBOARD_DATA_DIR: data, TMUX_TMPDIR: tmux }
     expect(() => validateRuntime(env, path.join(ui, 'ui.sock'))).not.toThrow()
     await chmod(temporary, 0o755)
     expect(() => validateRuntime(env, path.join(ui, 'ui.sock'))).toThrow()

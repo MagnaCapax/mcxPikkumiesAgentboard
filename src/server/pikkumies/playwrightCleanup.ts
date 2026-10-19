@@ -9,7 +9,7 @@ export default async function cleanup() {
   if (!id || !/^[a-f0-9]{16}$/.test(id)) return
   for (const name of readdirSync(tmpdir()).filter((entry) => entry.startsWith(`board-e2e-${id}-`))) {
     const root = path.join(tmpdir(), name)
-    const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: path.join(root, 'tmux') }
+    const env: NodeJS.ProcessEnv = { ...process.env, TMUX_TMPDIR: path.join(root, 'home', 'tmux') }
     delete env.TMUX
     spawnSync('tmux', ['kill-server'], { env, stdio: 'ignore' })
     rmSync(root, { recursive: true, force: true })

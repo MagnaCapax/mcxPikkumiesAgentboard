@@ -112,7 +112,7 @@ import { StallWatchdog } from './stallWatchdog'
 import { installSyncIoTiming } from './syncIoTiming'
 import { getTailscaleIp } from './tailscale'
 import { windowNameError } from './windowName'
-import { AccountGuard, loadGuardConfig, PIKKUMIES_WS_TYPES, validateRuntime } from './pikkumies/guard'
+import { AccountGuard, allowsPikkumiesMessage, loadGuardConfig, validateRuntime } from './pikkumies/guard'
 import { enforceWindowSizeLatest, pikkumiesRoutes } from './pikkumies/routes'
 
 const accountSocket = process.env.AGENTBOARD_SOCKET
@@ -126,8 +126,8 @@ const accountGuard = new AccountGuard(loadGuardConfig(testAuthBypass ? {
   AGENTBOARD_LAUNCHER_URL: 'https://panel.example.test/launch',
 } : process.env), undefined, () => process.exit(0))
 const pikkumiesMode = accountGuard.config.mode === 'pikkumies'
-if (pikkumiesMode && !testAuthBypass && (!process.env.AGENTBOARD_DATA_DIR || !process.env.TMUX_TMPDIR)) {
-  throw new Error('Pikkumies mode requires private data and tmux directories')
+if (!testAuthBypass && (!process.env.AGENTBOARD_DATA_DIR || !process.env.TMUX_TMPDIR)) {
+  throw new Error('Account mode requires private data and tmux directories')
 }
 setInterval(() => { if (accountGuard.clientIdleMs >= 30 * 60_000) process.exit(0) }, 60_000).unref?.()
 if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
@@ -2420,7 +2420,8 @@ async function serverFetch(req: Request, server: Server<WSData>) {
     return accountGuard.headers(new Response(useGzip ? compressed : Bun.file(file), { headers: {
       'Content-Type': url.pathname.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/css; charset=utf-8',
       'Cache-Control': 'public, max-age=31536000, immutable',
-      ...(useGzip ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}),
+      Vary: 'Accept-Encoding',
+      ...(useGzip ? { 'Content-Encoding': 'gzip' } : {}),
     } }), url.pathname)
   }
   accountGuard.touch()
@@ -2451,11 +2452,9 @@ const websocketHandlers = {
       return
     }
     if (pikkumiesMode) {
-      let value: { type?: unknown; sessionId?: unknown }
+      let value: { type?: unknown; sessionId?: unknown; tmuxTarget?: unknown }
       try { value = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message)) } catch { ws.close(1008); return }
-      if (typeof value.type !== 'string' || !PIKKUMIES_WS_TYPES.has(value.type) ||
-          (value.sessionId !== undefined &&
-           !registry.getAll().some((session) => session.id === value.sessionId && /^pm[1-9]$/.test(session.name)))) {
+      if (!allowsPikkumiesMessage(value, registry.getAll())) {
         ws.close(1008)
         return
       }

@@ -13,6 +13,19 @@ export const PIKKUMIES_WS_TYPES = new Set([
   'terminal-paste', 'terminal-resize', 'tmux-cancel-copy-mode', 'tmux-check-copy-mode',
 ])
 
+export function allowsPikkumiesMessage(
+  value: { type?: unknown; sessionId?: unknown; tmuxTarget?: unknown },
+  sessions: Array<{ id: string; name: string; tmuxWindow: string; remote?: boolean }>,
+): boolean {
+  if (typeof value.type !== 'string' || !PIKKUMIES_WS_TYPES.has(value.type)) return false
+  if (value.type === 'ping' || value.type === 'session-refresh') return value.sessionId === undefined
+  const session = sessions.find((row) => row.id === value.sessionId)
+  if (!session || session.remote || !/^pm[1-9]$/.test(session.name) ||
+      !/^pikkumies:(?:pm[1-9]|\d+|@\d+)$/.test(session.tmuxWindow)) return false
+  return value.type !== 'terminal-attach' ||
+    value.tmuxTarget === undefined || value.tmuxTarget === session.tmuxWindow
+}
+
 export interface GuardConfig {
   tokenDir: string
   allowedOrigin: string
@@ -66,9 +79,11 @@ export function validateRuntime(env: NodeJS.ProcessEnv, socket: string): void {
   const home = env.HOME
   const temporary = env.TMPDIR
   const tokenDir = env.AGENTBOARD_TOKEN_DIR
-  if (!home || !temporary || !tokenDir) throw new Error('Private account directories are required')
+  const dataDir = env.AGENTBOARD_DATA_DIR
+  const tmuxDir = env.TMUX_TMPDIR
+  if (!home || !temporary || !tokenDir || !dataDir || !tmuxDir) throw new Error('Private account directories are required')
   const resolvedHome = realpathSync(home)
-  for (const directory of [temporary, tokenDir, path.dirname(socket)]) {
+  for (const directory of [temporary, tokenDir, dataDir, tmuxDir, path.dirname(socket)]) {
     const resolved = realpathSync(directory)
     const info = statSync(resolved)
     if (!info.isDirectory() || (info.mode & 0o077) !== 0 ||
