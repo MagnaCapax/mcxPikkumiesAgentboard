@@ -34,4 +34,4 @@ Instead, please report them via:
 This fork provides a web-based interface to tmux terminal sessions. By design, a valid bearer grants terminal access as the account user. Run it only behind the account launcher and reverse proxy described in the README. The process refuses production TCP listeners.
 
 ---
-Last updated: February 2026
+Last updated: October 2026
