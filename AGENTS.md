@@ -1,6 +1,8 @@
 # Agentboard fork guide
 
-This public MIT fork runs one account-local interface per Unix socket. `AGENTBOARD_MODE=pikkumies` shows the simple Pikkumies tab strip; standard mode keeps the full interface. Both modes require a launch token and an authenticated API and WebSocket connection. The account launcher supplies the private socket, token directory, origin settings, data directory, and `TMUX_TMPDIR=<state>/tmux`.
+This public MIT fork runs one account-local interface per Unix socket. `AGENTBOARD_MODE=pikkumies` shows the simple Pikkumies tab strip; standard mode keeps the full interface. Both modes require a launch token and an authenticated API and WebSocket connection. The account launcher supplies a per-UI private directory `L/ui/<ui>/` with socket, token directory, and temporary directory, plus origin settings, data directory, and `TMUX_TMPDIR=<state>/tmux`. App responses carry `X-Pikkumies-App: 1`; only authenticated WebSockets reset the idle timer.
+
+The simple UI uses the upstream shortcut modifier, shows command failures inline, and holds an ask for manual Send after three exit-code-5 retries. Its tmux-buffer clipboard relay always offers click-to-copy.
 
 ## Stack and checks
 

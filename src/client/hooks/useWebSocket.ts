@@ -286,7 +286,7 @@ export class WebSocketManager {
       this.ws = null
       if (currentLaunch()) {
         void fetch('/api/health').then((response) => {
-          if ([401, 502, 503, 504].includes(response.status)) reconnectFromPanel()
+          if (response.status === 401 || ([502, 503, 504].includes(response.status) && response.headers.get('X-Pikkumies-App') !== '1')) reconnectFromPanel()
         }).catch(() => { /* normal reconnect handles transient network failure */ })
       }
       if (!this.manualClose) {

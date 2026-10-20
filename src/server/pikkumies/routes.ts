@@ -30,12 +30,12 @@ export function pikkumiesRoutes() {
   app.get('/eternals', async (c) => {
     try {
       const result = await run(['eternal', 'list', '--json'])
-      if (result.code !== 0) return c.json({ error: 'unavailable' }, 503)
+      if (result.code !== 0) return c.json({ error: 'unavailable' }, 424)
       const rows: unknown = JSON.parse(result.stdout)
       if (!Array.isArray(rows) || !rows.every((row) => row && typeof row === 'object' &&
-        ETERNAL_ID.test(row.id) && STATES.has(row.state))) return c.json({ error: 'invalid state' }, 502)
+        ETERNAL_ID.test(row.id) && STATES.has(row.state))) return c.json({ error: 'invalid state' }, 500)
       return c.json(rows)
-    } catch { return c.json({ error: 'unavailable' }, 503) }
+    } catch { return c.json({ error: 'unavailable' }, 424) }
   })
   app.post('/eternals', async (c) => {
     try {
@@ -44,16 +44,16 @@ export function pikkumiesRoutes() {
       await enforceWindowSizeLatest()
       const match = /\bpm[2-9]\b/.exec(result.stdout)
       return c.json({ id: match?.[0] ?? null })
-    } catch { return c.json({ error: 'unavailable' }, 503) }
+    } catch { return c.json({ error: 'unavailable' }, 424) }
   })
   app.post('/eternals/:id/quit', async (c) => {
     const id = c.req.param('id')
     if (!ETERNAL_ID.test(id) || id === 'pm1') return c.json({ error: 'invalid id' }, 400)
     try {
-      const result = await run(['eternal', 'quit', id])
+      const result = await run(['eternal', 'quit', '--', id])
       if (result.code !== 0) return c.json({ error: 'unavailable' }, 409)
       return c.json({ ok: true })
-    } catch { return c.json({ error: 'unavailable' }, 503) }
+    } catch { return c.json({ error: 'unavailable' }, 424) }
   })
   app.post('/ask', async (c) => {
     let body: { text?: unknown; nonce?: unknown }

@@ -300,6 +300,7 @@ interface UseTerminalOptions {
   letterSpacing: number
   fontFamily: string
   useWebGL: boolean
+  simplified?: boolean
   onPasteFiles?: (payload: { text: string; files: File[] }) => void
   onPasteError?: (message: string) => void
   onScrollChange?: (isAtBottom: boolean) => void
@@ -320,6 +321,7 @@ export function useTerminal({
   letterSpacing,
   fontFamily,
   useWebGL,
+  simplified = false,
   onScrollChange,
   onPasteFiles,
   onPasteError,
@@ -1716,7 +1718,7 @@ export function useTerminal({
         const text = message.text
         if (!text?.trim()) return
 
-        if (!isiOS && navigator.clipboard?.writeText) {
+        if (!simplified && !isiOS && navigator.clipboard?.writeText) {
           const startedAt = performance.now()
           void navigator.clipboard.writeText(text)
             .then(() => {

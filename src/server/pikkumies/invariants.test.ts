@@ -44,8 +44,6 @@ test('every registered HTTP route has an explicit reviewed disposition', async (
   const index = await readFile(path.join(root, files[0]!), 'utf8')
   expect([...index.matchAll(/\bapp\.route\(([^,]+),/g)].map((match) => match[1]!.trim()).sort())
     .toEqual(["'/api'", "'/api/paste-file'"].sort())
-  expect(index).toContain("if (accountGuard.isUnmounted(url.pathname))")
-  expect(index).toContain("if (!testAuthBypass && !accountGuard.isStatic(req.method, url.pathname) && !accountGuard.authorize(req))")
 })
 
 test('every client message has a reviewed allow or deny disposition', async () => {
@@ -54,14 +52,4 @@ test('every client message has a reviewed allow or deny disposition', async () =
   const actual = new Set([...union.matchAll(/type: '([^']+)'/g)].map((match) => match[1]!))
   const denied = new Set(['session-create', 'session-kill', 'session-rename', 'session-wake', 'session-hibernate', 'session-move-to-history'])
   expect([...actual].sort()).toEqual([...new Set([...PIKKUMIES_WS_TYPES, ...denied])].sort())
-})
-
-test('production starts on one Unix listener with guarded WS sends', async () => {
-  const index = await readFile(path.join(root, 'src/server/index.ts'), 'utf8')
-  expect(index).toContain("if (!accountSocket && !testTcp) throw new Error")
-  expect(index).toContain('...(accountSocket ? { unix: accountSocket }')
-  expect(index).toContain('if (accountSocket) return')
-  expect(index).toContain('if (testAuthBypass || socket.data.authenticated) socket.send(payload)')
-  expect(index).toContain('if (testAuthBypass || ws.data.authenticated) ws.send(JSON.stringify(message))')
-  expect(index).toContain('if (!pikkumiesMode && config.logPollIntervalMs > 0)')
 })

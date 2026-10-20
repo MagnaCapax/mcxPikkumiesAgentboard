@@ -3,7 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Session, SendClientMessage, SubscribeServerMessage } from '../../shared/types'
 import type { ConnectionStatus } from '../stores/sessionStore'
 import Terminal from '../components/Terminal'
-import { ToastViewport } from '../components/Toast'
+import { ToastViewport, toastManager } from '../components/Toast'
+import { getEffectiveModifier, matchesModifier } from '../utils/device'
+import { useSettingsStore } from '../stores/settingsStore'
 import { currentLaunch } from './bootstrap'
 import { PENDING_ASK_KEY, readPendingAsks, removePendingAsk, type PendingAsk } from './pendingAsk'
 
@@ -33,6 +35,8 @@ export default function PikkumiesLayout(props: Props) {
   })
   const [closingId, setClosingId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
+  const [pollError, setPollError] = useState('')
+  const shortcutModifier = useSettingsStore((state) => state.shortcutModifier)
   const [pending, setPending] = useState<PendingAsk[]>(() => readPendingAsks(localStorage.getItem(PENDING_ASK_KEY)))
   const [sendTick, setSendTick] = useState(0)
   const [sending, setSending] = useState(false)
@@ -46,7 +50,7 @@ export default function PikkumiesLayout(props: Props) {
   const poll = useCallback(async () => {
     try {
       const response = await fetch('/api/eternals')
-      if (!response.ok) return
+      if (!response.ok) { setPollError('Pikkumies could not load its windows.'); return }
       const rows = await response.json() as Eternal[]
       const next = rows.filter((row) => ID.test(row.id)).sort((a, b) => Number(a.id.slice(2)) - Number(b.id.slice(2)))
       const stamp = Date.now()
@@ -56,6 +60,7 @@ export default function PikkumiesLayout(props: Props) {
       }
       for (const id of stateSince.current.keys()) if (!next.some((row) => row.id === id)) stateSince.current.delete(id)
       setEternals(next)
+      setPollError('')
       setNow(stamp)
     } catch { /* existing state stays visible while reconnecting */ }
   }, [])
@@ -121,6 +126,7 @@ export default function PikkumiesLayout(props: Props) {
     if (!ask) return
     let cancelled = false
     let timer: number | undefined
+    let exitFiveRetries = 0
     async function deliver() {
       if (cancelled) return
       setSending(true)
@@ -136,6 +142,11 @@ export default function PikkumiesLayout(props: Props) {
           setPending(removePendingAsk(ask.nonce))
           setSending(false)
           setNotice('')
+          return
+        }
+        if (result.code === 5 && ++exitFiveRetries > 3) {
+          setSending(false)
+          setNotice('That did not go through')
           return
         }
         if (result.code === 2 || result.code === 5 || result.code === 6) {
@@ -198,15 +209,15 @@ export default function PikkumiesLayout(props: Props) {
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
+      if (event.defaultPrevented || !matchesModifier(event, getEffectiveModifier(shortcutModifier))) return
       const index = tabs.findIndex((tab) => tab.id === targetId)
       let next: string | undefined
-      if (/^[1-9]$/.test(event.key)) next = tabs[Number(event.key) - 1]?.id
-      else if (event.key === '[') next = tabs[Math.max(0, index - 1)]?.id
-      else if (event.key === ']') next = tabs[Math.min(tabs.length - 1, index + 1)]?.id
-      else if (event.key.toLowerCase() === 'n') { event.preventDefault(); void create(); return }
-      else if (event.key.toLowerCase() === 'x') { event.preventDefault(); if (targetId !== 'pm1') setClosingId(targetId); return }
-      else if (event.key === ',') { event.preventDefault(); return }
+      if (/^Digit[1-9]$/.test(event.code)) next = tabs[Number(event.code.slice(5)) - 1]?.id
+      else if (event.code === 'BracketLeft') next = tabs[Math.max(0, index - 1)]?.id
+      else if (event.code === 'BracketRight') next = tabs[Math.min(tabs.length - 1, index + 1)]?.id
+      else if (event.code === 'KeyN') { event.preventDefault(); void create(); return }
+      else if (event.code === 'KeyX') { event.preventDefault(); if (targetId !== 'pm1') setClosingId(targetId); return }
+      else if (event.code === 'Comma') { event.preventDefault(); return }
       if (next) { event.preventDefault(); setTargetId(next) }
     }
     window.addEventListener('keydown', keydown, true)
@@ -226,15 +237,16 @@ export default function PikkumiesLayout(props: Props) {
           }}
           className="flex h-full items-center gap-2 rounded-md px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" title={item.id === 'pm1' ? 'Primary always runs' : undefined} onClick={() => setTargetId(item.id)}>
           <span>{item.id === 'pm1' ? 'Primary' : `Pikkumies ${item.id.slice(2)}`}</span>
-          {item.state === 'running' ? <span aria-label="Running" className="h-2 w-2 rounded-full bg-green-400" /> :
+          {item.state === 'running' ? <><span aria-hidden="true" className="h-2 w-2 rounded-full bg-green-400" /><span className="sr-only"> Running</span></> :
             <span className="text-amber-300">{item.state === 'waiting-for-setup' ? 'Needs setup' : 'Starting'}{slow(item) ? ' Taking longer than usual. Contact support.' : ''}</span>}
         </button>
         {item.id !== 'pm1' && <button className="flex h-11 w-11 items-center justify-center text-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" aria-label={`Close Pikkumies ${item.id.slice(2)}`} onClick={() => setClosingId(item.id)}>×</button>}
       </div>)}
-      <button aria-label="New Pikkumies" title={tabs.length >= 9 ? 'You have 9 Pikkumies, the maximum' : undefined} onClick={() => { if (tabs.length >= 9) setNotice('You have 9 Pikkumies, the maximum'); else void create() }} className="h-11 shrink-0 rounded-md px-2 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]">+ New Pikkumies</button>
+      <button aria-label="New Pikkumies" onClick={() => { if (tabs.length >= 9) toastManager.add({ title: 'You have 9 Pikkumies, the maximum', type: 'info' }); else void create() }} className="h-11 shrink-0 rounded-md px-2 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]">+ New Pikkumies</button>
       {props.connectionStatus !== 'connected' && <span aria-label="Reconnecting..." className="ml-auto h-2 w-2 shrink-0 rounded-full bg-amber-400" />}
     </div>
     {active?.state === 'waiting-for-setup' && <div className="bg-amber-950 px-3 py-2 text-sm text-amber-200">Pikkumies needs you to finish setup in the window below.</div>}
+    {pollError && <div role="status" className="bg-amber-950 px-3 py-2 text-sm text-amber-200">{pollError}</div>}
     <div aria-live="polite" className={notice || pending.length ? 'bg-amber-950 px-3 py-2 text-sm text-amber-200' : 'sr-only'}>
       {pending.length > 0 && <span>Not sent yet: {pending[0]!.text.slice(0, 60)}. </span>}
       {sending && <span>Sending your message… </span>}{notice}

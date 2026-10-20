@@ -114,6 +114,13 @@ import { getTailscaleIp } from './tailscale'
 import { windowNameError } from './windowName'
 import { AccountGuard, allowsPikkumiesMessage, loadGuardConfig, validateRuntime } from './pikkumies/guard'
 import { enforceWindowSizeLatest, pikkumiesRoutes } from './pikkumies/routes'
+import { startClientIdleMonitor } from './pikkumies/clientIdle'
+import packageJson from '../../package.json'
+
+if (process.argv.includes('--version')) {
+  console.log(`agentboard ${packageJson.version}`)
+  process.exit(0)
+}
 
 const accountSocket = process.env.AGENTBOARD_SOCKET
 const testTcp = process.env.NODE_ENV === 'test' && process.env.AGENTBOARD_TEST_TCP === '1'
@@ -129,7 +136,7 @@ const pikkumiesMode = accountGuard.config.mode === 'pikkumies'
 if (!testAuthBypass && (!process.env.AGENTBOARD_DATA_DIR || !process.env.TMUX_TMPDIR)) {
   throw new Error('Account mode requires private data and tmux directories')
 }
-setInterval(() => { if (accountGuard.clientIdleMs >= 30 * 60_000) process.exit(0) }, 60_000).unref?.()
+startClientIdleMonitor(accountGuard, () => process.exit(0))
 if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
   throw new Error('Pikkumies mode requires its tmux session and PTY terminal mode')
 }
@@ -2424,7 +2431,6 @@ async function serverFetch(req: Request, server: Server<WSData>) {
       ...(useGzip ? { 'Content-Encoding': 'gzip' } : {}),
     } }), url.pathname)
   }
-  accountGuard.touch()
   return accountGuard.headers(await app.fetch(req), url.pathname)
 }
 

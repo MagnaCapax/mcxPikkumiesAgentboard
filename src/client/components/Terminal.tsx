@@ -214,6 +214,7 @@ export default function Terminal({
     letterSpacing,
     fontFamily,
     useWebGL,
+    simplified,
     onScrollChange: (isAtBottom) => {
       setShowScrollButton(!isAtBottom)
     },

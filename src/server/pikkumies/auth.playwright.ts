@@ -60,6 +60,22 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`)
     ws.onclose = (event) => resolve(event.code)
   }))).toBe(1008)
+  expect(await page.evaluate(() => new Promise<number>((resolve) => {
+    const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`
+    const sockets = Array.from({ length: 16 }, () => new WebSocket(url))
+    let frames = 0
+    Promise.all(sockets.map((socket) => new Promise<void>((opened) => {
+      socket.onmessage = () => { frames++ }
+      socket.onopen = () => opened()
+    }))).then(() => {
+      const excess = new WebSocket(url)
+      excess.onmessage = () => { frames++ }
+      excess.onclose = (event) => {
+        sockets.forEach((socket) => socket.close())
+        resolve(frames === 0 ? event.code : -1)
+      }
+    })
+  }))).toBe(1008)
   const delivered: string[] = []
   await page.route('**/api/ask', async (route) => {
     const text = (route.request().postDataJSON() as { text: string }).text
@@ -89,8 +105,10 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   })
   await expect(page.getByRole('tab', { name: /Pikkumies 2/ })).toBeVisible({ timeout: 7000 })
   await page.keyboard.press('Control+2')
+  await expect(page.getByRole('tab', { name: /Primary/ })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Control+Shift+2')
   await expect(page.getByRole('tab', { name: /Pikkumies 2/ })).toHaveAttribute('aria-selected', 'true')
-  await page.keyboard.press('Control+x')
+  await page.keyboard.press('Control+Shift+x')
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Keep it' })).toBeFocused()
   await page.keyboard.press('Escape')
@@ -119,4 +137,77 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   })
   await page.clock.fastForward(10 * 60_000)
   expect(await page.evaluate(() => (window as Window & { __closedSockets?: number }).__closedSockets)).toBeGreaterThan(0)
+})
+
+test('iframe ready, gateway reconnect, and denied WebSocket messages', async ({ page }) => {
+  const base = `http://127.0.0.1:${Number(process.env.E2E_PORT) || 4176}`
+  let bearer = ''
+  page.on('response', async (response) => {
+    if (response.url().endsWith('/api/auth') && response.ok()) bearer = (await response.json() as { bearer: string }).bearer
+  })
+  await page.goto(base)
+  await page.route(`${base}/`, async (route) => {
+    const response = await route.fetch()
+    const headers: Record<string, string> = { ...response.headers(), 'content-security-policy': 'frame-ancestors *' }
+    delete headers['x-frame-options']
+    await route.fulfill({ response, headers })
+  })
+  await page.evaluate(() => {
+    const parent = window as Window & { __pikkumiesMessages?: string[] }
+    parent.__pikkumiesMessages = []
+    parent.postMessage = (message: unknown) => { parent.__pikkumiesMessages!.push(String(message)) }
+    const iframe = document.createElement('iframe')
+    iframe.src = `${location.origin}/#${'f'.repeat(64)}`
+    document.body.appendChild(iframe)
+  })
+  await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).toContain('pikkumies:ready')
+  await expect.poll(() => bearer).not.toBe('')
+  expect(await page.evaluate((token) => new Promise<number>((resolve) => {
+    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`)
+    ws.onopen = () => ws.send(JSON.stringify({ bearer: token }))
+    ws.onmessage = () => ws.send(JSON.stringify({ type: 'session-kill', sessionId: 'forbidden' }))
+    ws.onclose = (event) => resolve(event.code)
+  }), bearer)).toBe(1008)
+  const frame = page.frames()[1]!
+  await page.frameLocator('iframe').getByRole('button', { name: 'New Pikkumies' }).click()
+  await expect(page.frameLocator('iframe').getByText('Pikkumies is not running right now.')).toBeVisible()
+  await page.route('**/api/eternals', (route) => route.fulfill({ status: 503,
+    headers: { 'X-Pikkumies-App': '1', 'Content-Type': 'application/json' }, body: '{"error":"unavailable"}' }))
+  await frame.evaluate(() => fetch('/api/eternals'))
+  expect(await page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).not.toContain('pikkumies:reconnect')
+  await expect(page.frameLocator('iframe').getByTestId('pikkumies-layout')).toBeVisible()
+  await page.unroute('**/api/eternals')
+  await page.route('**/api/eternals', (route) => route.abort('failed'))
+  await frame.evaluate(() => fetch('/api/eternals').catch(() => {}))
+  expect(await page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).not.toContain('pikkumies:reconnect')
+  await expect(page.frameLocator('iframe').getByTestId('pikkumies-layout')).toBeVisible()
+  await page.unroute('**/api/eternals')
+  await page.route('**/api/eternals', (route) => route.fulfill({ status: 503, body: 'gateway unavailable' }))
+  await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages), { timeout: 10_000 }).toContain('pikkumies:reconnect')
+})
+
+test('busy ask stops after three retries and remains available to send', async ({ page }) => {
+  const base = `http://127.0.0.1:${Number(process.env.E2E_PORT) || 4176}`
+  await page.goto(`${base}/#${'a'.repeat(64)}`)
+  await expect(page.getByTestId('pikkumies-layout')).toBeVisible()
+  await page.clock.install()
+  let attempts = 0
+  await page.route('**/api/ask', (route) => {
+    attempts++
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":false,"code":5}' })
+  })
+  await page.evaluate(() => {
+    const value = JSON.stringify([{ text: 'held question', nonce: 'q'.repeat(20), ts: Date.now() }])
+    localStorage.setItem('pending-ask', value)
+    window.dispatchEvent(new StorageEvent('storage', { key: 'pending-ask', newValue: value }))
+  })
+  await expect.poll(() => attempts).toBe(1)
+  await page.clock.runFor(15_000)
+  await expect.poll(() => attempts).toBe(4)
+  await expect(page.getByText('That did not go through')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+  await page.clock.runFor(10_000)
+  expect(attempts).toBe(4)
+  await page.getByRole('button', { name: 'Send' }).click()
+  await expect.poll(() => attempts).toBe(5)
 })

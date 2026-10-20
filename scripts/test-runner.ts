@@ -159,6 +159,9 @@ async function main() {
       }
     }
     const sharedTestsDir = 'src/shared/__tests__'
+    for await (const file of new Bun.Glob('src/client/pikkumies/*.test.ts').scan({ onlyFiles: true })) {
+      clientTests.push(file)
+    }
 
     await runCommand(
       ['bun', 'test', ...passthroughArgs, ...serverTests, sharedTestsDir, ...clientTests],

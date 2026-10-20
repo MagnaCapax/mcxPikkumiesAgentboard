@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, writeFile, rm, mkdir, chmod, symlink } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir, chmod, symlink, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { AccountGuard, allowsPikkumiesMessage, loadGuardConfig, resolveStaticDir, validateRuntime } from './guard'
+import { startClientIdleMonitor } from './clientIdle'
 
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
@@ -18,6 +19,24 @@ function makeGuard(dir: string) {
 }
 
 describe('account guard', () => {
+  test('static requests cannot keep the process alive without an authenticated WebSocket', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
+    const guard = makeGuard(dir)
+    let exits = 0
+    const timer = startClientIdleMonitor(guard, () => { exits++ }, 20, 5)
+    try {
+      for (let i = 0; i < 8; i++) {
+        const response = guard.headers(new Response('index'), '/')
+        expect(response.status).toBe(200)
+        await Bun.sleep(5)
+      }
+      expect(exits).toBeGreaterThan(0)
+      guard.clientOpened()
+      const before = exits
+      await Bun.sleep(15)
+      expect(exits).toBe(before)
+    } finally { clearInterval(timer) }
+  })
   test('terminal frames cannot choose another tmux window', () => {
     const sessions = [{ id: 'one', name: 'pm1', tmuxWindow: 'pikkumies:0' }]
     expect(allowsPikkumiesMessage({ type: 'terminal-attach', sessionId: 'one' }, sessions)).toBe(true)
@@ -100,6 +119,7 @@ describe('account guard', () => {
     for (const token of ['z'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), '../outside', 'A'.repeat(64)]) {
       expect((await exchange(token)).status).toBe(401)
     }
+    expect(await readdir(dir)).toEqual([])
     const token = 'c'.repeat(64)
     const outside = path.join(dir, 'outside')
     await writeFile(outside, token, { mode: 0o600 })

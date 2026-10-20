@@ -6,7 +6,7 @@ import net from 'node:net'
 
 const root = mkdtempSync(path.join(tmpdir(), `board-e2e-${process.env.AGENTBOARD_E2E_ID ?? 'manual'}-`))
 const home = path.join(root, 'home')
-const ui = path.join(home, 'local', 'ui')
+const ui = path.join(home, 'local', 'ui', 'pikkumies')
 const tokenDir = path.join(ui, 'tokens')
 const temporary = path.join(ui, 'tmp')
 const socket = path.join(ui, 'ui.sock')
@@ -15,6 +15,8 @@ const binDir = path.join(root, 'bin')
 for (const dir of [home, ui, tokenDir, temporary, tmuxDir, binDir, path.join(home, 'data')]) mkdirSync(dir, { recursive: true, mode: 0o700 })
 const token = 'e'.repeat(64)
 writeFileSync(path.join(tokenDir, token), token, { mode: 0o600 })
+writeFileSync(path.join(tokenDir, 'f'.repeat(64)), 'f'.repeat(64), { mode: 0o600 })
+writeFileSync(path.join(tokenDir, 'a'.repeat(64)), 'a'.repeat(64), { mode: 0o600 })
 writeFileSync(path.join(binDir, 'pikkumies'), '#!/bin/sh\nif [ "$1" = eternal ] && [ "$2" = list ]; then echo \'[{"id":"pm1","state":"running"}]\'; exit 0; fi\nexit 1\n', { mode: 0o700 })
 
 const env: Record<string, string | undefined> = { ...process.env, HOME: home, TMPDIR: temporary, TMUX_TMPDIR: tmuxDir,

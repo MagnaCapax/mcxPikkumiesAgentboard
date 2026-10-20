@@ -107,7 +107,6 @@ export class AccountGuard {
   get clientIdleMs(): number { return this.openClients ? 0 : Date.now() - this.lastClientAt }
   clientOpened(): void { this.openClients++; this.lastClientAt = Date.now() }
   clientClosed(): void { this.openClients = Math.max(0, this.openClients - 1); this.lastClientAt = Date.now() }
-  touch(): void { this.lastClientAt = Date.now() }
 
   isStatic(method: string, pathname: string): boolean {
     return method === 'GET' && this.staticAllow.has(pathname)
@@ -155,13 +154,13 @@ export class AccountGuard {
       this.issuedAt = Date.now()
       setTimeout(this.onExpiry, MAX_BEARER_AGE_MS).unref?.()
     }
-    this.touch()
     return Response.json({ bearer: this.bearer, allowedOrigin: this.config.allowedOrigin, launcherUrl: this.config.launcherUrl, mode: this.config.mode }, { headers: { 'Cache-Control': 'no-store' } })
   }
 
   headers(response: Response, pathname = ''): Response {
     const headers = new Headers(response.headers)
     headers.delete('set-cookie')
+    headers.set('X-Pikkumies-App', '1')
     headers.set('Content-Security-Policy', `frame-ancestors ${this.config.frameAncestor}` + (FILE_PATH.test(pathname) ? '; sandbox' : ''))
     headers.set('X-Frame-Options', `ALLOW-FROM ${this.config.frameAncestor}`)
     headers.set('Cache-Control', pathname === '/' ? 'no-store' : headers.get('Cache-Control') ?? 'no-store')
