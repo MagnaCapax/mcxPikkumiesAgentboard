@@ -16,13 +16,14 @@ for (const dir of [home, ui, tokenDir, temporary, tmuxDir, binDir, path.join(hom
 const token = 'e'.repeat(64)
 writeFileSync(path.join(tokenDir, token), token, { mode: 0o600 })
 writeFileSync(path.join(tokenDir, 'f'.repeat(64)), 'f'.repeat(64), { mode: 0o600 })
+writeFileSync(path.join(tokenDir, 'b'.repeat(64)), 'b'.repeat(64), { mode: 0o600 })
 writeFileSync(path.join(tokenDir, 'a'.repeat(64)), 'a'.repeat(64), { mode: 0o600 })
 writeFileSync(path.join(binDir, 'pikkumies'), '#!/bin/sh\nif [ "$1" = eternal ] && [ "$2" = list ]; then echo \'[{"id":"pm1","state":"running"}]\'; exit 0; fi\nexit 1\n', { mode: 0o700 })
 
 const env: Record<string, string | undefined> = { ...process.env, HOME: home, TMPDIR: temporary, TMUX_TMPDIR: tmuxDir,
   TMUX_SESSION: 'pikkumies', TERMINAL_MODE: 'pty', AGENTBOARD_MODE: 'pikkumies',
   AGENTBOARD_SOCKET: socket, AGENTBOARD_TOKEN_DIR: tokenDir,
-  AGENTBOARD_DATA_DIR: path.join(home, 'data'), AGENTBOARD_STATIC_DIR: 'dist/client',
+  AGENTBOARD_DATA_DIR: path.join(home, 'data'), AGENTBOARD_STATIC_DIR: process.env.AGENTBOARD_E2E_STATIC_DIR ?? 'dist/client',
   AGENTBOARD_ALLOWED_ORIGIN: 'https://panel.example.test',
   AGENTBOARD_FRAME_ANCESTORS: 'https://panel.example.test',
   AGENTBOARD_LAUNCHER_URL: 'https://panel.example.test/launch',

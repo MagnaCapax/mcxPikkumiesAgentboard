@@ -88,6 +88,8 @@ async function main() {
       // any later test file that imports `../config` (notably
       // logPoller.test.ts, which depends on skipMatchingPatterns).
       'terminalProxyFactory.test.ts',
+      // Spawns the real guarded server; parallel Bun.spawn mocks can prevent startup.
+      'guard.test.ts',
       // fadParity.test.ts repoints agent-discovery env vars
       // (CLAUDE_CONFIG_DIR, CODEX_HOME, PI_HOME, GROK_HOME,
       // PI_CODING_AGENT_DIR, AGENTBOARD_DATA_DIR, DEVIN_CLI_DIR) at the
@@ -148,7 +150,7 @@ async function main() {
       }
     }
     for await (const file of new Bun.Glob('src/server/pikkumies/*.test.ts').scan({ onlyFiles: true })) {
-      serverTests.push(file)
+      if (!ISOLATED_FILES.has(path.basename(file))) serverTests.push(file)
     }
 
     const clientTests: string[] = []
@@ -176,7 +178,8 @@ async function main() {
     // orderings where it loads first (Linux ext4).
     for (const file of ISOLATED_FILES) {
       await runCommand(
-        ['bun', 'test', ...passthroughArgs, `src/server/__tests__/${file}`],
+        ['bun', 'test', ...passthroughArgs,
+          file === 'guard.test.ts' ? `src/server/pikkumies/${file}` : `src/server/__tests__/${file}`],
         env
       )
     }

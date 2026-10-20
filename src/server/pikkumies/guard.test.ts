@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, writeFile, rm, mkdir, chmod, symlink, readdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, readFile, rm, mkdir, chmod, symlink, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import net from 'node:net'
 import { AccountGuard, allowsPikkumiesMessage, loadGuardConfig, resolveStaticDir, validateRuntime } from './guard'
-import { startClientIdleMonitor } from './clientIdle'
 
 const dirs: string[] = []
 afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }) })
@@ -19,24 +19,46 @@ function makeGuard(dir: string) {
 }
 
 describe('account guard', () => {
-  test('static requests cannot keep the process alive without an authenticated WebSocket', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
-    const guard = makeGuard(dir)
-    let exits = 0
-    const timer = startClientIdleMonitor(guard, () => { exits++ }, 20, 5)
+  test('real static requests cannot keep the server alive, but an authenticated WebSocket can', async () => {
+    const staticDir = await mkdtemp(path.join(tmpdir(), 'board-static-')); dirs.push(staticDir)
+    await writeFile(path.join(staticDir, 'index.html'), '<html>ok</html>')
+    const listener = net.createServer()
+    await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve))
+    const port = (listener.address() as net.AddressInfo).port
+    await new Promise<void>((resolve) => listener.close(() => resolve()))
+    const fixture = Bun.spawn(['bun', 'src/server/pikkumies/e2eServer.ts'], { env: {
+      ...process.env, NODE_ENV: 'test', E2E_PORT: String(port), AGENTBOARD_E2E_STATIC_DIR: staticDir,
+      AGENTBOARD_TEST_IDLE_MS: '350', AGENTBOARD_TEST_IDLE_CHECK_MS: '20',
+    }, stdout: 'pipe', stderr: 'pipe' })
+    void new Response(fixture.stdout).text()
+    void new Response(fixture.stderr).text()
+    const base = `http://127.0.0.1:${port}`
+    const get = () => fetch(base).then((response) => response.status).catch(() => 0)
     try {
-      for (let i = 0; i < 8; i++) {
-        const response = guard.headers(new Response('index'), '/')
-        expect(response.status).toBe(200)
-        await Bun.sleep(5)
+      for (let i = 0; i < 100 && await get() !== 200; i++) await Bun.sleep(20)
+      expect(await get()).toBe(200)
+      const auth = await fetch(`${base}/api/auth`, { method: 'POST', body: JSON.stringify({ token: 'f'.repeat(64) }) })
+      expect(auth.status).toBe(200)
+      const { bearer } = await auth.json() as { bearer: string }
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => { ws.send(JSON.stringify({ bearer })) }
+        ws.onmessage = () => resolve()
+        ws.onerror = () => reject(new Error('WebSocket authentication failed'))
+      })
+      for (let i = 0; i < 35; i++) {
+        expect(await get()).toBe(200)
+        await Bun.sleep(20)
       }
-      expect(exits).toBeGreaterThan(0)
-      guard.clientOpened()
-      const before = exits
-      await Bun.sleep(15)
-      expect(exits).toBe(before)
-    } finally { clearInterval(timer) }
-  })
+      ws.close()
+      let exited = false
+      for (let i = 0; i < 50; i++) {
+        if (await get() === 0) { exited = true; break }
+        await Bun.sleep(20)
+      }
+      expect(exited).toBe(true)
+    } finally { fixture.kill(); await fixture.exited }
+  }, 20_000)
   test('terminal frames cannot choose another tmux window', () => {
     const sessions = [{ id: 'one', name: 'pm1', tmuxWindow: 'pikkumies:0' }]
     expect(allowsPikkumiesMessage({ type: 'terminal-attach', sessionId: 'one' }, sessions)).toBe(true)
@@ -111,15 +133,31 @@ describe('account guard', () => {
   })
 
   test('rejects malformed names before filesystem access and rejects symlinks', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(dir)
+    const root = await mkdtemp(path.join(tmpdir(), 'board-guard-')); dirs.push(root)
+    const dir = path.join(root, 'tokens')
+    await mkdir(dir)
     const guard = makeGuard(dir)
     const exchange = (token: string) => guard.exchange(new Request('https://local.test/api/auth', {
       method: 'POST', body: JSON.stringify({ token }),
     }))
-    for (const token of ['z'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), '../outside', 'A'.repeat(64)]) {
+    const malformed = ['../outside', 'a/b', '', 'a'.repeat(65)]
+    await mkdir(path.join(dir, 'a'))
+    await mkdir(path.join(dir, '...'))
+    await mkdir(path.join(dir, '.a'))
+    const targets = malformed.map((token) => path.resolve(dir, token))
+    for (const [index, target] of targets.entries()) {
+      if (target === dir) await writeFile(path.join(dir, 'marker'), 'unchanged')
+      else await writeFile(target, `unchanged-${index}`, { mode: 0o600 })
+    }
+    for (const token of ['z'.repeat(64), 'a'.repeat(63), 'A'.repeat(64), ...malformed]) {
       expect((await exchange(token)).status).toBe(401)
     }
-    expect(await readdir(dir)).toEqual([])
+    for (const [index, target] of targets.entries()) {
+      if (target === dir) {
+        expect((await stat(target)).isDirectory()).toBe(true)
+        expect(await readFile(path.join(dir, 'marker'), 'utf8')).toBe('unchanged')
+      } else expect(await readFile(target, 'utf8')).toBe(`unchanged-${index}`)
+    }
     const token = 'c'.repeat(64)
     const outside = path.join(dir, 'outside')
     await writeFile(outside, token, { mode: 0o600 })
