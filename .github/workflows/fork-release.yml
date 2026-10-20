@@ -17,13 +17,23 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
-      - run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: sudo apt-get update && sudo apt-get install -y tmux qemu-user
       - run: bun x playwright install --with-deps chromium
       - run: bun run lint
       - run: bun run typecheck
       - run: env -u TMUX bun run test:ci
       - run: bun run build
-      - run: env -u TMUX bun x playwright test --config src/server/pikkumies/playwright.config.ts
+      - run: bun build src/server/index.ts src/server/sessionRefreshWorker.ts src/server/logMatchWorker.ts src/server/devinSyncWorker.ts src/server/stallWatchdogWorker.ts src/server/sessionReadWorker.ts src/server/sessionMetadataWorker.ts --compile --target bun-linux-x64-baseline --outfile agentboard-linux-x64
+      - run: qemu-x86_64 -cpu Nehalem ./agentboard-linux-x64 --version
+      - run: sha256sum agentboard-linux-x64 > agentboard-linux-x64.sha256
+      - run: env -u TMUX AGENTBOARD_E2E_BINARY="$PWD/agentboard-linux-x64" bun x playwright test --config src/server/pikkumies/playwright.config.ts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-agentboard-linux-x64
+          path: |
+            agentboard-linux-x64
+            agentboard-linux-x64.sha256
+            dist/client/**
 
   linux-x64:
     needs: verify
@@ -32,16 +42,13 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
-      - run: bun run build
-      - run: bun build src/server/index.ts src/server/sessionRefreshWorker.ts src/server/logMatchWorker.ts src/server/devinSyncWorker.ts src/server/stallWatchdogWorker.ts src/server/sessionReadWorker.ts src/server/sessionMetadataWorker.ts --compile --target bun-linux-x64-baseline --outfile agentboard-linux-x64
+          name: verified-agentboard-linux-x64
+      - run: sha256sum --check agentboard-linux-x64.sha256
       - name: Package binary and frontend
         run: |
           tar -czf agentboard-linux-x64-frontend.tar.gz dist/client
-          sha256sum agentboard-linux-x64 > agentboard-linux-x64.sha256
           sha256sum agentboard-linux-x64-frontend.tar.gz > agentboard-linux-x64-frontend.tar.gz.sha256
       - name: Attach release assets
         env:
