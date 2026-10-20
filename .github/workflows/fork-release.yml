@@ -49,13 +49,19 @@ jobs:
         run: |
           tar -czf agentboard-linux-x64-frontend.tar.gz dist/client
           sha256sum agentboard-linux-x64-frontend.tar.gz > agentboard-linux-x64-frontend.tar.gz.sha256
+          # One archive with the binary as `agentboard` and its frontend beside it, the layout installers use.
+          mkdir -p pkg
+          install -m 0755 agentboard-linux-x64 pkg/agentboard
+          cp -R dist pkg/dist
+          tar -czf agentboard-linux-x64-baseline.tar.gz --owner=0 --group=0 --numeric-owner -C pkg agentboard dist/client
+          sha256sum agentboard-linux-x64-baseline.tar.gz > agentboard-linux-x64-baseline.tar.gz.sha256
       - name: Attach release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 --clobber
+            gh release upload "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 agentboard-linux-x64-baseline.tar.gz agentboard-linux-x64-baseline.tar.gz.sha256 --clobber
           else
-            gh release create "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 --generate-notes
+            gh release create "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 agentboard-linux-x64-baseline.tar.gz agentboard-linux-x64-baseline.tar.gz.sha256 --generate-notes
           fi
