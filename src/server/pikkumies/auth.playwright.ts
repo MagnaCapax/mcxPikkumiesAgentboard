@@ -68,14 +68,20 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
       socket.onmessage = () => { frames++ }
       socket.onopen = () => opened()
     }))).then(() => {
+      // The server evicts the oldest pre-auth socket when the new one arrives; the client may see that close
+      // before the new socket's open event, so wait for both before judging.
       const excess = new WebSocket(url)
       excess.onmessage = () => { frames++ }
-      sockets[0]!.onclose = (event) => {
-        const accepted = excess.readyState === WebSocket.OPEN
+      const evicted = new Promise<number>((closed) => { sockets[0]!.onclose = (event) => closed(event.code) })
+      const accepted = new Promise<boolean>((done) => {
+        excess.onopen = () => done(true)
+        excess.onclose = () => done(false)
+      })
+      Promise.all([evicted, accepted]).then(([code, ok]) => {
         sockets.slice(1).forEach((socket) => socket.close())
         excess.close()
-        resolve(frames === 0 && accepted ? event.code : -1)
-      }
+        resolve(frames === 0 && ok ? code : -1)
+      })
     })
   }))).toBe(1008)
   const delivered: string[] = []
