@@ -136,7 +136,9 @@ const pikkumiesMode = accountGuard.config.mode === 'pikkumies'
 if (!testAuthBypass && (!process.env.AGENTBOARD_DATA_DIR || !process.env.TMUX_TMPDIR)) {
   throw new Error('Account mode requires private data and tmux directories')
 }
-startClientIdleMonitor(accountGuard, () => process.exit(0))
+startClientIdleMonitor(accountGuard, () => process.exit(0),
+  process.env.NODE_ENV === 'test' ? Number(process.env.AGENTBOARD_TEST_IDLE_MS) || 30 * 60_000 : undefined,
+  process.env.NODE_ENV === 'test' ? Number(process.env.AGENTBOARD_TEST_IDLE_CHECK_MS) || 60_000 : undefined)
 if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
   throw new Error('Pikkumies mode requires its tmux session and PTY terminal mode')
 }
@@ -2441,7 +2443,10 @@ const websocketHandlers = {
   open(ws: ServerWebSocket<WSData>) {
     sockets.add(ws)
     if (testAuthBypass) { ws.data.authenticated = true; accountGuard.clientOpened(); sendInitialState(ws); return }
-    if (preAuthSockets.size >= 16) { ws.close(1008); return }
+    if (preAuthSockets.size >= 16) {
+      const oldest = preAuthSockets.values().next().value
+      if (oldest) { preAuthSockets.delete(oldest); oldest.close(1008) }
+    }
     preAuthSockets.add(ws)
     setTimeout(() => { if (!ws.data.authenticated) ws.close(1008) }, 5000)
   },

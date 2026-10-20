@@ -70,9 +70,11 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
     }))).then(() => {
       const excess = new WebSocket(url)
       excess.onmessage = () => { frames++ }
-      excess.onclose = (event) => {
-        sockets.forEach((socket) => socket.close())
-        resolve(frames === 0 ? event.code : -1)
+      sockets[0]!.onclose = (event) => {
+        const accepted = excess.readyState === WebSocket.OPEN
+        sockets.slice(1).forEach((socket) => socket.close())
+        excess.close()
+        resolve(frames === 0 && accepted ? event.code : -1)
       }
     })
   }))).toBe(1008)
@@ -139,6 +141,45 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   expect(await page.evaluate(() => (window as Window & { __closedSockets?: number }).__closedSockets)).toBeGreaterThan(0)
 })
 
+test('desktop simplified clipboard offer can be copied', async ({ page, context }, testInfo) => {
+  const base = `http://127.0.0.1:${Number(process.env.E2E_PORT) || 4176}`
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base })
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket
+    class ObservedWebSocket extends NativeWebSocket {
+      send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+        if (typeof data === 'string') {
+          try {
+            const message = JSON.parse(data) as { type?: string; sessionId?: string }
+            if (message.type === 'terminal-attach' && message.sessionId) {
+              ;(window as Window & { __attachedSocket?: WebSocket; __attachedSession?: string }).__attachedSocket = this
+              ;(window as Window & { __attachedSession?: string }).__attachedSession = message.sessionId
+            }
+          } catch { /* Ignore non-JSON frames. */ }
+        }
+        return super.send(data)
+      }
+    }
+    window.WebSocket = ObservedWebSocket
+  })
+  await page.goto(`${base}/#${'f'.repeat(64)}`)
+  await expect(page.getByTestId('pikkumies-layout')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as Window & { __attachedSession?: string }).__attachedSession)).toBeTruthy()
+  const offered = 'desktop clipboard offer'
+  await page.evaluate((text) => {
+    const state = window as Window & { __attachedSocket?: WebSocket; __attachedSession?: string }
+    state.__attachedSocket!.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({
+      type: 'clipboard-offer', sessionId: state.__attachedSession, source: 'tmux-buffer', text,
+    }) }))
+  }, offered)
+  const copy = page.getByRole('button', { name: 'Copy selection' })
+  await expect(copy).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('pikkumies-desktop-copy.png') })
+  await copy.click()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(offered)
+})
+
 test('iframe ready, gateway reconnect, and denied WebSocket messages', async ({ page }) => {
   const base = `http://127.0.0.1:${Number(process.env.E2E_PORT) || 4176}`
   let bearer = ''
@@ -157,7 +198,7 @@ test('iframe ready, gateway reconnect, and denied WebSocket messages', async ({ 
     parent.__pikkumiesMessages = []
     parent.postMessage = (message: unknown) => { parent.__pikkumiesMessages!.push(String(message)) }
     const iframe = document.createElement('iframe')
-    iframe.src = `${location.origin}/#${'f'.repeat(64)}`
+    iframe.src = `${location.origin}/#${'b'.repeat(64)}`
     document.body.appendChild(iframe)
   })
   await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).toContain('pikkumies:ready')

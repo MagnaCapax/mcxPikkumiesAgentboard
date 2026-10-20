@@ -1486,7 +1486,7 @@ export default function Terminal({
           </div>
         )}
         {pendingClipboardOffer && session && (
-          <div className={`absolute ${showScrollButton && !isSelectingText ? 'bottom-20' : 'bottom-8'} left-1/2 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-elevated/95 px-2 py-2 shadow-lg backdrop-blur-sm md:hidden`}>
+          <div className={`absolute ${showScrollButton && !isSelectingText ? 'bottom-20' : 'bottom-8'} left-1/2 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-elevated/95 px-2 py-2 shadow-lg backdrop-blur-sm ${simplified ? '' : 'md:hidden'}`}>
             <span className="max-w-[12rem] truncate text-xs text-secondary md:max-w-[18rem]">
               Selection ready
             </span>
