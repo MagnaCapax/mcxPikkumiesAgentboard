@@ -46,6 +46,10 @@ export function createTmuxTmpDir(prefix = 'agentboard-tmux-'): string {
  * mutation having run first: tmux resolves the socket from $TMUX before
  * TMUX_TMPDIR, so an inherited TMUX silently redirects every call —
  * including kill-session/kill-server — to the user's live server.
+ * HISTFILE=/dev/null: the window shell is the user's real interactive bash,
+ * so every command a test types with send-keys would otherwise be saved to
+ * the user's ~/.bash_history when the session is killed (one suite run left
+ * 160 echo lines there).
  */
 export function privateTmuxEnv(
   tmuxTmpDir: string | null
@@ -53,6 +57,7 @@ export function privateTmuxEnv(
   const env: NodeJS.ProcessEnv = { ...process.env }
   delete env.TMUX
   if (tmuxTmpDir) env.TMUX_TMPDIR = tmuxTmpDir
+  env.HISTFILE = '/dev/null'
   return env
 }
 
