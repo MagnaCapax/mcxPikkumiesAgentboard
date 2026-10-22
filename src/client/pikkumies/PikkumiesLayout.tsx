@@ -10,7 +10,14 @@ import { currentLaunch } from './bootstrap'
 import { PENDING_ASK_KEY, readPendingAsks, removePendingAsk, type PendingAsk } from './pendingAsk'
 
 type EternalState = 'running' | 'starting' | 'waiting-for-setup' | 'not-ready' | 'quit'
-type Eternal = { id: string; state: EternalState }
+type Eternal = { id: string; state: EternalState; why?: string }
+const CREDITS_HELP = 'https://pulsedmedia.com/clients/knowledgebase.php?action=displayarticle&id=143'
+/** What a window that cannot start tells the customer, by the reason `pikkumies eternal list` reports. */
+const notReadyText = (why?: string) => why === 'no-credits'
+  ? 'Pikkumies is out of AI credits. Credits are added with each paid invoice, or you can add a Virsilipas plan. Pikkumies starts by itself once credits arrive.'
+  : why === 'no-key'
+    ? 'Pikkumies has no AI key on your account yet. The key is added automatically; if this message stays for more than an hour, contact support.'
+    : 'Pikkumies cannot start right now. It keeps trying by itself; if this message stays for more than ten minutes, contact support.'
 const ID = /^pm[1-9]$/
 const LAST_TAB_KEY = 'pikkumies-last-tab'
 
@@ -191,7 +198,7 @@ export default function PikkumiesLayout(props: Props) {
   const active = eternals.find((item) => item.id === targetId)
   const visible = eternals.filter((item) => item.id !== 'pm1' && item.state !== 'quit')
   const tabs = [{ id: 'pm1', state: eternals.find((item) => item.id === 'pm1')?.state ?? 'starting' }, ...visible] as Eternal[]
-  const slow = (item: Eternal) => item.state !== 'running' && now - (stateSince.current.get(item.id)?.since ?? now) > 180_000
+  const slow = (item: Eternal) => item.state !== 'running' && item.state !== 'not-ready' && now - (stateSince.current.get(item.id)?.since ?? now) > 180_000
   useEffect(() => {
     if (!closingId) return
     previousFocus.current = document.activeElement as HTMLElement | null
@@ -238,7 +245,7 @@ export default function PikkumiesLayout(props: Props) {
           className="flex h-full items-center gap-2 rounded-md px-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" title={item.id === 'pm1' ? 'Primary always runs' : undefined} onClick={() => setTargetId(item.id)}>
           <span>{item.id === 'pm1' ? 'Primary' : `Pikkumies ${item.id.slice(2)}`}</span>
           {item.state === 'running' ? <><span aria-hidden="true" className="h-2 w-2 rounded-full bg-green-400" /><span className="sr-only"> Running</span></> :
-            <span className="text-amber-300">{item.state === 'waiting-for-setup' ? 'Needs setup' : 'Starting'}{slow(item) ? ' Taking longer than usual. Contact support.' : ''}</span>}
+            <span className="text-amber-300">{item.state === 'waiting-for-setup' ? 'Needs setup' : item.state === 'not-ready' ? 'Not started' : 'Starting'}{slow(item) ? ' Taking longer than usual. Contact support.' : ''}</span>}
         </button>
         {item.id !== 'pm1' && <button className="flex h-11 w-11 items-center justify-center text-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" aria-label={`Close Pikkumies ${item.id.slice(2)}`} onClick={() => setClosingId(item.id)}>×</button>}
       </div>)}
@@ -253,9 +260,13 @@ export default function PikkumiesLayout(props: Props) {
       {pending.length > 0 && !sending && <button className="ml-2 rounded px-2 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" onClick={() => setSendTick((tick) => tick + 1)}>Send</button>}
     </div>
     <div id="pikkumies-panel" role="tabpanel" aria-label={targetId === 'pm1' ? 'Primary' : `Pikkumies ${targetId.slice(2)}`} className="flex min-h-0 flex-1 flex-col">
+    {!selected && active?.state === 'not-ready' ? <div role="status" data-testid="pikkumies-not-ready" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-amber-200">
+      <p className="max-w-md">{notReadyText(active.why)}</p>
+      {active.why === 'no-credits' && <a className="underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" href={CREDITS_HELP} target="_blank" rel="noopener noreferrer">How AI credits work</a>}
+    </div> :
     <Terminal simplified session={selected} sessions={props.sessions} connectionStatus={props.connectionStatus} connectionEpoch={props.connectionEpoch}
       sendMessage={props.sendMessage} subscribe={props.subscribe} onClose={() => {}} onSelectSession={props.selectSession}
-      onNewSession={() => {}} onKillSession={() => {}} onRenameSession={() => {}} onResumeSession={() => {}} onOpenSettings={() => {}} />
+      onNewSession={() => {}} onKillSession={() => {}} onRenameSession={() => {}} onResumeSession={() => {}} onOpenSettings={() => {}} />}
     </div>
     {closingId && <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div className="mx-4 w-full max-w-sm rounded-lg bg-[#1e293b] p-5">
