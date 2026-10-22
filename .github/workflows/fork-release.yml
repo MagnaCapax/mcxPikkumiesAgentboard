@@ -3,7 +3,8 @@ name: Fork release
 on:
   push:
     tags:
-      - 'v*'
+      # Fork releases only: upstream tags (vX.Y.Z) fetched into this repo must not build or publish.
+      - 'v*-pikkumies.*'
 
 permissions:
   contents: read
@@ -64,7 +65,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 agentboard-linux-x64-baseline.tar.gz agentboard-linux-x64-baseline.tar.gz.sha256 --clobber
+            gh release upload "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 agentboard-linux-x64-baseline.tar.gz agentboard-linux-x64-baseline.tar.gz.sha256
           else
             gh release create "$GITHUB_REF_NAME" agentboard-linux-x64 agentboard-linux-x64.sha256 agentboard-linux-x64-frontend.tar.gz agentboard-linux-x64-frontend.tar.gz.sha256 agentboard-linux-x64-baseline.tar.gz agentboard-linux-x64-baseline.tar.gz.sha256 --generate-notes
           fi
