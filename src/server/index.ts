@@ -122,8 +122,15 @@ if (process.argv.includes('--version')) {
   process.exit(0)
 }
 
+// A release build never honours the test hooks below, whatever its environment says: the build defines
+// AGENTBOARD_RELEASE_BUILD=true, and a compiled binary runs from Bun's embedded /$bunfs/ tree. Only a source run
+// under the test runner (NODE_ENV=test) may open the TCP listener or skip auth.
+declare const AGENTBOARD_RELEASE_BUILD: boolean | undefined
+const releaseBuild = (typeof AGENTBOARD_RELEASE_BUILD !== 'undefined' && AGENTBOARD_RELEASE_BUILD === true)
+  || Bun.main.startsWith('/$bunfs/')
+const testHooks = !releaseBuild && process.env.NODE_ENV === 'test'
 const accountSocket = process.env.AGENTBOARD_SOCKET
-const testTcp = process.env.NODE_ENV === 'test' && process.env.AGENTBOARD_TEST_TCP === '1'
+const testTcp = testHooks && process.env.AGENTBOARD_TEST_TCP === '1'
 const testAuthBypass = testTcp && process.env.AGENTBOARD_TEST_AUTH_BYPASS === '1'
 if (!accountSocket && !testTcp) throw new Error('AGENTBOARD_SOCKET is required')
 if (accountSocket && !testTcp) validateRuntime(process.env, accountSocket)
@@ -137,8 +144,8 @@ if (!testAuthBypass && (!process.env.AGENTBOARD_DATA_DIR || !process.env.TMUX_TM
   throw new Error('Account mode requires private data and tmux directories')
 }
 startClientIdleMonitor(accountGuard, () => process.exit(0),
-  process.env.NODE_ENV === 'test' ? Number(process.env.AGENTBOARD_TEST_IDLE_MS) || 30 * 60_000 : undefined,
-  process.env.NODE_ENV === 'test' ? Number(process.env.AGENTBOARD_TEST_IDLE_CHECK_MS) || 60_000 : undefined)
+  testHooks ? Number(process.env.AGENTBOARD_TEST_IDLE_MS) || 30 * 60_000 : undefined,
+  testHooks ? Number(process.env.AGENTBOARD_TEST_IDLE_CHECK_MS) || 60_000 : undefined)
 if (pikkumiesMode && (process.env.TMUX_SESSION !== 'pikkumies' || process.env.TERMINAL_MODE !== 'pty')) {
   throw new Error('Pikkumies mode requires its tmux session and PTY terminal mode')
 }

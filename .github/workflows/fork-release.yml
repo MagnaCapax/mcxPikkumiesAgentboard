@@ -23,7 +23,10 @@ jobs:
       - run: bun run typecheck
       - run: env -u TMUX bun run test:ci
       - run: bun run build
-      - run: bun build src/server/index.ts src/server/sessionRefreshWorker.ts src/server/logMatchWorker.ts src/server/devinSyncWorker.ts src/server/stallWatchdogWorker.ts src/server/sessionReadWorker.ts src/server/sessionMetadataWorker.ts --compile --target bun-linux-x64-baseline --outfile agentboard-linux-x64
+      - run: bun build src/server/index.ts src/server/sessionRefreshWorker.ts src/server/logMatchWorker.ts src/server/devinSyncWorker.ts src/server/stallWatchdogWorker.ts src/server/sessionReadWorker.ts src/server/sessionMetadataWorker.ts --compile --target bun-linux-x64-baseline --define AGENTBOARD_RELEASE_BUILD=true --outfile agentboard-linux-x64
+      - run: |
+          out=$(env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test AGENTBOARD_TEST_TCP=1 AGENTBOARD_TEST_AUTH_BYPASS=1 timeout 10 ./agentboard-linux-x64 2>&1 || true)
+          echo "$out" | grep -q "AGENTBOARD_SOCKET is required"
       - run: qemu-x86_64 -cpu Nehalem ./agentboard-linux-x64 --version
       - run: sha256sum agentboard-linux-x64 > agentboard-linux-x64.sha256
       - run: env -u TMUX AGENTBOARD_E2E_BINARY="$PWD/agentboard-linux-x64" bun x playwright test --config src/server/pikkumies/playwright.config.ts
