@@ -85,6 +85,10 @@ jobs:
       - name: Nehalem CPU smoke test
         run: qemu-x86_64 -cpu Nehalem ./agentboard --version
 
+      # The ci job skips real-tmux tests (no tmux there); this job has tmux, so run the whole suite here.
+      - name: Unit and real-tmux tests (Linux with tmux)
+        run: env -u TMUX bun run test
+
       - name: Fork security and interface e2e
         run: env -u TMUX AGENTBOARD_E2E_BINARY="$PWD/agentboard" bun x playwright test --config src/server/pikkumies/playwright.config.ts
 
