@@ -120,6 +120,8 @@ async function main() {
     // (e.g. on Linux ext4) the modal test sees the stub and breaks.
     const ISOLATED_CLIENT_FILES = new Set([
       'main.test.ts',
+      // stubs ../pikkumies/bootstrap with a Pikkumies launch for the whole process
+      'websocketHiddenLoad.test.ts',
       // agentIcon.test.tsx stubs the shared components/icons module; a
       // module stub leaks into every later importer in the same process
       // (prChips.test.tsx once saw XCloseIcon lose forwarded props).

@@ -321,6 +321,8 @@ export class WebSocketManager {
     this.lifecycleStarted = true
     document.addEventListener('visibilitychange', this.onVisibilityChange)
     window.addEventListener('pageshow', this.onPageShow)
+    // A tab opened in the background never fires visibilitychange, so start its hidden timer here.
+    if (this.isHidden()) this.scheduleHiddenClose()
 
     // Time-jump detector catches cases where visibility events don't fire
     // (e.g. iOS PWA suspended for a long period)
@@ -396,6 +398,15 @@ export class WebSocketManager {
 
   // ── Private ──────────────────────────────────────────────
 
+  /** Pikkumies: a tab hidden for 10 minutes drops its socket, so the server's idle exit can fire. */
+  private scheduleHiddenClose() {
+    if (currentLaunch()?.mode !== 'pikkumies' || this.hiddenCloseTimer !== null) return
+    this.hiddenCloseTimer = window.setTimeout(() => {
+      this.hiddenCloseTimer = null
+      if (this.isHidden()) { this.destroySocket(); this.setStatus('disconnected') }
+    }, 10 * 60_000)
+  }
+
   private onVisibilityChange = () => {
     clientLog('ws_visibility', { state: document.visibilityState, ...this.wsSnap() }, 'info')
     if (document.visibilityState === 'visible') {
@@ -421,12 +432,7 @@ export class WebSocketManager {
         this.forceReconnect('visibilitychange', true)
       }
     } else {
-      if (currentLaunch()?.mode === 'pikkumies') {
-        this.hiddenCloseTimer = window.setTimeout(() => {
-          this.hiddenCloseTimer = null
-          if (this.isHidden()) { this.destroySocket(); this.setStatus('disconnected') }
-        }, 10 * 60_000)
-      }
+      this.scheduleHiddenClose()
       // Pause heartbeat when hidden — iOS freezes timers anyway,
       // and pong timeout would false-positive on wake.
       this.stopHeartbeat()
