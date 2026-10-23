@@ -690,6 +690,52 @@ describe('useTerminal', () => {
     expect(sendCalls.some((call) => call.type === 'terminal-resize')).toBe(true)
   })
 
+  test('a hidden terminal never fits or sends a size; it does once it is shown', () => {
+    const sendCalls: Array<Record<string, unknown>> = []
+    const { container } = createContainerMock()
+    let shown = false
+    const containerAny = container as unknown as { getBoundingClientRect: () => { width: number; height: number } }
+    const visibleRect = containerAny.getBoundingClientRect
+    // A tab hidden with display:none lays out to 0 x 0.
+    containerAny.getBoundingClientRect = () => (shown ? visibleRect() : { ...visibleRect(), width: 0, height: 0 })
+
+    const harness = (fontSize: number) => (
+      <TerminalHarness
+        sessionId="session-1"
+        tmuxTarget="agentboard:@1"
+        sendMessage={(message) => sendCalls.push(message)}
+        subscribe={() => () => {}}
+        theme={{ background: '#000' }}
+        fontSize={fontSize}
+      />
+    )
+
+    let renderer!: TestRenderer.ReactTestRenderer
+    act(() => {
+      renderer = TestRenderer.create(harness(12), { createNodeMock: () => container })
+    })
+
+    const fitAddon = FitAddonMock.instances[0]
+    if (!fitAddon) throw new Error('Expected fit addon instance')
+    expect(fitAddon.fitCalls).toBe(0)
+    const attach = sendCalls.find((call) => call.type === 'terminal-attach')
+    expect(attach?.cols).toBe(80)
+    expect(attach?.rows).toBe(24)
+
+    act(() => {
+      renderer.update(harness(13))
+    })
+    expect(fitAddon.fitCalls).toBe(0)
+    expect(sendCalls.some((call) => call.type === 'terminal-resize')).toBe(false)
+
+    shown = true
+    act(() => {
+      renderer.update(harness(14))
+    })
+    expect(fitAddon.fitCalls).toBeGreaterThan(0)
+    expect(sendCalls.some((call) => call.type === 'terminal-resize')).toBe(true)
+  })
+
   test('adds text presentation selectors to output on iOS only', async () => {
     globalAny.navigator = {
       userAgent: 'iPhone',

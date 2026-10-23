@@ -22,6 +22,21 @@ const snapshotCache = new Map<string, string>()
 const MAX_SNAPSHOT_ENTRIES = 20
 
 /** Remove a single session's cached terminal snapshot. */
+/**
+ * A terminal whose tab is hidden (display:none) has no size, and fitting it gives xterm's minimum of
+ * 2 columns by 1 row. Sent to the server, that size shrinks the shared tmux window for every other
+ * client and for anything reading the pane. Fit only while the container is laid out; a hidden
+ * terminal keeps its last size and the resize observer fits it when it is shown again.
+ */
+export function fitWhenVisible(container: HTMLElement | null, fitAddon: { fit(): void }): boolean {
+  if (!container) return false
+  // Something that cannot be measured is fitted as before; only a measured 0 x 0 is hidden.
+  const rect = typeof container.getBoundingClientRect === 'function' ? container.getBoundingClientRect() : null
+  if (rect && !(rect.width > 0 && rect.height > 0)) return false
+  fitAddon.fit()
+  return true
+}
+
 export function invalidateSnapshotCache(sessionId: string): void {
   snapshotCache.delete(sessionId)
 }
@@ -543,7 +558,7 @@ export function useTerminal({
     const fitAddon = fitAddonRef.current
     if (!terminal || !fitAddon) return
 
-    fitAddon.fit()
+    if (!fitWhenVisible(containerRef.current, fitAddon)) return
 
     const attached = attachedSessionRef.current
     if (attached) {
@@ -643,7 +658,7 @@ export function useTerminal({
       }
 
       terminal.open(container)
-      fitAddon.fit()
+      fitWhenVisible(container, fitAddon)
 
       if (!hasLoggedInitRef.current) {
         hasLoggedInitRef.current = true
@@ -1211,10 +1226,9 @@ export function useTerminal({
       // Recalculate lineHeight for integer cell height
       terminal.options.lineHeight = Math.round(fontSize * lineHeight) / fontSize
       terminal.options.letterSpacing = letterSpacing
-      fitAddon.fit()
-      // Notify server of new dimensions
+      // Notify server of new dimensions (only real ones: a hidden terminal has none)
       const attached = attachedSessionRef.current
-      if (attached) {
+      if (fitWhenVisible(containerRef.current, fitAddon) && attached) {
         sendMessageRef.current({
           type: 'terminal-resize',
           sessionId: attached,
@@ -1405,7 +1419,7 @@ export function useTerminal({
       // Fit terminal first to get accurate dimensions
       const fitAddon = fitAddonRef.current
       if (fitAddon) {
-        fitAddon.fit()
+        fitWhenVisible(containerRef.current, fitAddon)
       }
       const fitDone = performance.now()
 
