@@ -1,5 +1,6 @@
 /** Fragment exchange, in-memory API bearer, and exact-origin reconnect. */
-type Launch = { bearer: string; allowedOrigin: string; launcherUrl: string; mode: 'pikkumies' | 'standard' }
+// panelOrigin is the control panel that frames this UI; messages to it must name its origin, not this UI's.
+type Launch = { bearer: string; allowedOrigin: string; panelOrigin: string; launcherUrl: string; mode: 'pikkumies' | 'standard' }
 let launch: Launch | null = null
 let lastReconnect = 0
 
@@ -14,7 +15,7 @@ function showUnavailable(): void {
 export function reconnectFromPanel(): boolean {
   if (!launch || Date.now() - lastReconnect < 30_000) return false
   lastReconnect = Date.now()
-  if (window.parent !== window) window.parent.postMessage('pikkumies:reconnect', launch.allowedOrigin)
+  if (window.parent !== window) window.parent.postMessage('pikkumies:reconnect', launch.panelOrigin)
   else window.location.assign(launch.launcherUrl)
   return true
 }

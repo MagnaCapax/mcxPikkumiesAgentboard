@@ -202,12 +202,13 @@ test('iframe ready, gateway reconnect, and denied WebSocket messages', async ({ 
   await page.evaluate(() => {
     const parent = window as Window & { __pikkumiesMessages?: string[] }
     parent.__pikkumiesMessages = []
-    parent.postMessage = (message: unknown) => { parent.__pikkumiesMessages!.push(String(message)) }
+    // A browser drops a message whose target origin is not the parent's, so the target is part of what is checked.
+    parent.postMessage = ((message: unknown, targetOrigin: string) => { parent.__pikkumiesMessages!.push(`${String(message)} -> ${targetOrigin}`) }) as typeof window.postMessage
     const iframe = document.createElement('iframe')
     iframe.src = `${location.origin}/#${'b'.repeat(64)}`
     document.body.appendChild(iframe)
   })
-  await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).toContain('pikkumies:ready')
+  await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).toContain('pikkumies:ready -> https://panel.example.test')
   await expect.poll(() => bearer).not.toBe('')
   expect(await page.evaluate((token) => new Promise<number>((resolve) => {
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`)
@@ -221,16 +222,16 @@ test('iframe ready, gateway reconnect, and denied WebSocket messages', async ({ 
   await page.route('**/api/eternals', (route) => route.fulfill({ status: 503,
     headers: { 'X-Pikkumies-App': '1', 'Content-Type': 'application/json' }, body: '{"error":"unavailable"}' }))
   await frame.evaluate(() => fetch('/api/eternals'))
-  expect(await page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).not.toContain('pikkumies:reconnect')
+  expect(await page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages!.filter((m) => m.startsWith('pikkumies:reconnect')))).toEqual([])
   await expect(page.frameLocator('iframe').getByTestId('pikkumies-layout')).toBeVisible()
   await page.unroute('**/api/eternals')
   await page.route('**/api/eternals', (route) => route.abort('failed'))
   await frame.evaluate(() => fetch('/api/eternals').catch(() => {}))
-  expect(await page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages)).not.toContain('pikkumies:reconnect')
+  expect(await page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages!.filter((m) => m.startsWith('pikkumies:reconnect')))).toEqual([])
   await expect(page.frameLocator('iframe').getByTestId('pikkumies-layout')).toBeVisible()
   await page.unroute('**/api/eternals')
   await page.route('**/api/eternals', (route) => route.fulfill({ status: 503, body: 'gateway unavailable' }))
-  await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages), { timeout: 10_000 }).toContain('pikkumies:reconnect')
+  await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages), { timeout: 10_000 }).toContain('pikkumies:reconnect -> https://panel.example.test')
 })
 
 test('busy ask stops after three retries and remains available to send', async ({ page }) => {

@@ -154,7 +154,7 @@ export class AccountGuard {
       this.issuedAt = Date.now()
       setTimeout(this.onExpiry, MAX_BEARER_AGE_MS).unref?.()
     }
-    return Response.json({ bearer: this.bearer, allowedOrigin: this.config.allowedOrigin, launcherUrl: this.config.launcherUrl, mode: this.config.mode }, { headers: { 'Cache-Control': 'no-store' } })
+    return Response.json({ bearer: this.bearer, allowedOrigin: this.config.allowedOrigin, panelOrigin: this.config.frameAncestor, launcherUrl: this.config.launcherUrl, mode: this.config.mode }, { headers: { 'Cache-Control': 'no-store' } })
   }
 
   headers(response: Response, pathname = ''): Response {

@@ -107,7 +107,7 @@ export default function PikkumiesLayout(props: Props) {
   }, [targetId])
 
   useEffect(() => {
-    const origin = currentLaunch()?.allowedOrigin
+    const origin = currentLaunch()?.panelOrigin
     if (origin && window.parent !== window) requestAnimationFrame(() => window.parent.postMessage('pikkumies:ready', origin))
     document.title = 'Pikkumies'
     document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.setAttribute('href', '/pikkumies.svg')
