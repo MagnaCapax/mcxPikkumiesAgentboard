@@ -35,7 +35,6 @@ beforeEach(() => {
     removeEventListener: () => {},
   }
   globalAny.document = {
-    baseURI: 'http://localhost:1234/',
     get visibilityState() { return visibility },
     addEventListener: (event: string, handler: () => void) => { if (event === 'visibilitychange') visibilityListeners.push(handler) },
     removeEventListener: (event: string, handler: () => void) => {

@@ -121,7 +121,6 @@ function setupDom() {
   } as unknown as Navigator
 
   globalAny.document = {
-    baseURI: 'http://localhost:1234/',
     addEventListener: () => {},
     removeEventListener: () => {},
     documentElement: {

@@ -100,7 +100,6 @@ function makeWindowMock() {
 
 function makeDocumentMock() {
   return {
-    baseURI: 'http://localhost:1234/',
     get visibilityState() {
       return mockVisibilityState
     },
