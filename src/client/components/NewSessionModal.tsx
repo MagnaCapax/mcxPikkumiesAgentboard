@@ -58,6 +58,9 @@ export default function NewSessionModal({
   const projectPathRef = useRef<HTMLInputElement>(null)
   const defaultButtonRef = useRef<HTMLButtonElement>(null)
   const wasOpenRef = useRef(false)
+  // The terminal refocus after closing; cancelled when the dialog opens again or unmounts, so it never
+  // re-enables the terminal behind an open dialog or touches a page that no longer shows this one.
+  const refocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showHostPicker = remoteAllowControl && remoteHosts.length > 0
 
@@ -81,9 +84,17 @@ export default function NewSessionModal({
     setCommand('')
   }
 
+  useEffect(() => () => {
+    if (refocusTimerRef.current) clearTimeout(refocusTimerRef.current)
+  }, [])
+
   useEffect(() => {
     const wasOpen = wasOpenRef.current
     wasOpenRef.current = isOpen
+    if (isOpen && refocusTimerRef.current) {
+      clearTimeout(refocusTimerRef.current)
+      refocusTimerRef.current = null
+    }
     if (!isOpen) {
       setProjectPath('')
       setName('')
@@ -94,7 +105,8 @@ export default function NewSessionModal({
       // Focus terminal after modal closes — only on an actual open→closed
       // transition, not on mount or dep changes while it stays closed.
       if (wasOpen) {
-        setTimeout(() => {
+        refocusTimerRef.current = setTimeout(() => {
+          refocusTimerRef.current = null
           if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return
           const textarea = document.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null
           if (textarea) {
