@@ -53,6 +53,12 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Built UI uses relative URLs
+        # The UI is served under a path such as /user-<name>/pikkumies/, so built files must not use root-absolute URLs.
+        run: |
+          if grep -l 'url(/' dist/client/assets/*.css; then exit 1; fi
+          if grep -E '(href|src)="/' dist/client/index.html; then exit 1; fi
+
   e2e:
     runs-on: ubuntu-latest
     steps:

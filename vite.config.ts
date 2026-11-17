@@ -29,6 +29,8 @@ export default defineConfig(({ mode }) => {
   const backendPort = env.PORT || '4040'
 
   return {
+    // Relative asset URLs, so the built UI also works when served under a path such as /user-<name>/pikkumies/.
+    base: './',
     plugins: [
       react(),
     ],

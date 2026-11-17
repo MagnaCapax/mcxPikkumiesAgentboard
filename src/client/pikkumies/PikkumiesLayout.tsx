@@ -110,10 +110,10 @@ export default function PikkumiesLayout(props: Props) {
     const origin = currentLaunch()?.panelOrigin
     if (origin && window.parent !== window) requestAnimationFrame(() => window.parent.postMessage('pikkumies:ready', origin))
     document.title = 'Pikkumies'
-    document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.setAttribute('href', '/pikkumies.svg')
+    document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.setAttribute('href', 'pikkumies.svg')
     const manifest = document.createElement('link')
     manifest.rel = 'manifest'
-    manifest.href = '/pikkumies.webmanifest'
+    manifest.setAttribute('href', 'pikkumies.webmanifest')
     document.head.appendChild(manifest)
     return () => manifest.remove()
   }, [])

@@ -112,6 +112,10 @@ describe('account guard', () => {
     expect(accepted.status).toBe(200)
     const { bearer } = await accepted.json() as { bearer: string }
     expect(guard.checkBearer(bearer)).toBe(true)
+    expect(guard.authorize(new Request('https://local.test/api/sessions', { headers: { 'X-Pikkumies-Token': bearer } }))).toBe(true)
+    // The panel login uses Authorization and is removed before the request arrives, so a bearer there is not accepted.
+    expect(guard.authorize(new Request('https://local.test/api/sessions', { headers: { Authorization: `Bearer ${bearer}` } }))).toBe(false)
+    expect(guard.authorize(new Request('https://local.test/api/sessions', { headers: { 'X-Pikkumies-Token': 'x'.repeat(bearer.length) } }))).toBe(false)
     expect((await guard.exchange(request())).status).toBe(401)
     const response = guard.headers(new Response('<html></html>', { headers: { 'Content-Type': 'text/html', 'Set-Cookie': 'bad=1' } }), '/api/session-media/id')
     expect(response.headers.get('set-cookie')).toBeNull()

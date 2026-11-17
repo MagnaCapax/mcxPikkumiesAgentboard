@@ -178,8 +178,10 @@ export class WebSocketManager {
     this.clearConnectTimer()
     this.setStatus('connecting')
 
-    const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const wsUrl = `${scheme}://${window.location.host}/ws`
+    // Resolved against the page, so the socket stays under the path the UI is served from.
+    const wsTarget = new URL('ws', document.baseURI)
+    wsTarget.protocol = wsTarget.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = wsTarget.href
     clientLog('ws_connect', { url: wsUrl, resume: this.isResumeAttempt, ...this.wsSnap() }, 'info')
 
     const ws = new WebSocket(wsUrl)

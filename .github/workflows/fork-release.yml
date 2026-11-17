@@ -24,6 +24,11 @@ jobs:
       - run: bun run typecheck
       - run: env -u TMUX bun run test:ci
       - run: bun run build
+      - name: Built UI uses relative URLs
+        # The UI is served under a path such as /user-<name>/pikkumies/, so built files must not use root-absolute URLs.
+        run: |
+          if grep -l 'url(/' dist/client/assets/*.css; then exit 1; fi
+          if grep -E '(href|src)="/' dist/client/index.html; then exit 1; fi
       - run: bun build src/server/index.ts src/server/sessionRefreshWorker.ts src/server/logMatchWorker.ts src/server/devinSyncWorker.ts src/server/stallWatchdogWorker.ts src/server/sessionReadWorker.ts src/server/sessionMetadataWorker.ts --compile --target bun-linux-x64-baseline --define AGENTBOARD_RELEASE_BUILD=true --outfile agentboard-linux-x64
       - run: |
           out=$(env -i PATH="$PATH" HOME="$HOME" NODE_ENV=test AGENTBOARD_TEST_TCP=1 AGENTBOARD_TEST_AUTH_BYPASS=1 timeout 10 ./agentboard-linux-x64 2>&1 || true)

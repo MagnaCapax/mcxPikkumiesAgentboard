@@ -73,6 +73,7 @@ function setupDom() {
     })
 
   globalAny.document = {
+    baseURI: 'http://localhost:1234/',
     addEventListener: () => {},
     removeEventListener: () => {},
     querySelector: () => null,

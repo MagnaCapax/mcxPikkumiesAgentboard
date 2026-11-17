@@ -4,6 +4,7 @@ import { constants, realpathSync, statSync, readdirSync } from 'node:fs'
 import { open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 
+export const PIKKUMIES_TOKEN_HEADER = 'X-Pikkumies-Token'
 const MAX_BEARER_AGE_MS = 8 * 60 * 60 * 1000
 const MAX_LAUNCH_AGE_MS = 60_000
 const STATIC_EXTENSION = /\.(?:html|js|css|svg|png|ico|woff2|webmanifest)$/
@@ -116,9 +117,10 @@ export class AccountGuard {
     return this.config.mode === 'pikkumies' && FILE_PATH.test(pathname)
   }
 
+  // The panel's own login travels in Authorization and is removed before a request reaches this server, so the bearer has its own header.
   authorize(request: Request): boolean {
-    const value = request.headers.get('authorization')
-    return value?.startsWith('Bearer ') === true && this.checkBearer(value.slice(7))
+    const value = request.headers.get(PIKKUMIES_TOKEN_HEADER)
+    return typeof value === 'string' && this.checkBearer(value)
   }
 
   checkBearer(value: string): boolean {
