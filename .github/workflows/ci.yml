@@ -60,7 +60,8 @@ jobs:
           if grep -E '(href|src)="/' dist/client/index.html; then exit 1; fi
 
   e2e:
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, for which Playwright has no Chromium build yet.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
