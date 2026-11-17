@@ -84,25 +84,6 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
       })
     })
   }))).toBe(1008)
-  const delivered: string[] = []
-  await page.route('**/api/ask', async (route) => {
-    const text = (route.request().postDataJSON() as { text: string }).text
-    delivered.push(text)
-    const held = text === 'first question' && delivered.filter((item) => item === text).length === 1
-    await route.fulfill({ status: 200, contentType: 'application/json', body: held ? '{"accepted":false,"code":3}' : '{"accepted":true,"code":0}' })
-  })
-  const sender = await page.context().newPage()
-  await sender.goto(base)
-  await sender.evaluate(() => localStorage.setItem('pending-ask', JSON.stringify([
-    { text: 'first question', nonce: 'a'.repeat(20), ts: Date.now() },
-    { text: 'second question', nonce: 'b'.repeat(20), ts: Date.now() },
-  ])))
-  await expect(page.getByText(/Not sent yet: first question/)).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
-  await page.getByRole('button', { name: 'Send' }).click()
-  await expect.poll(() => delivered).toEqual(['first question', 'first question', 'second question'])
-  await expect(page.getByText('Not sent yet:')).toHaveCount(0)
-  await sender.close()
   await page.screenshot({ path: testInfo.outputPath('pikkumies.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   expect((await page.getByTestId('pikkumies-strip').boundingBox())?.height).toBe(44)
@@ -234,28 +215,3 @@ test('iframe ready, gateway reconnect, and denied WebSocket messages', async ({ 
   await expect.poll(() => page.evaluate(() => (window as Window & { __pikkumiesMessages?: string[] }).__pikkumiesMessages), { timeout: 10_000 }).toContain('pikkumies:reconnect -> https://panel.example.test')
 })
 
-test('busy ask stops after three retries and remains available to send', async ({ page }) => {
-  const base = `http://127.0.0.1:${Number(process.env.E2E_PORT) || 4176}`
-  await page.goto(`${base}/#${'a'.repeat(64)}`)
-  await expect(page.getByTestId('pikkumies-layout')).toBeVisible()
-  await page.clock.install()
-  let attempts = 0
-  await page.route('**/api/ask', (route) => {
-    attempts++
-    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":false,"code":5}' })
-  })
-  await page.evaluate(() => {
-    const value = JSON.stringify([{ text: 'held question', nonce: 'q'.repeat(20), ts: Date.now() }])
-    localStorage.setItem('pending-ask', value)
-    window.dispatchEvent(new StorageEvent('storage', { key: 'pending-ask', newValue: value }))
-  })
-  await expect.poll(() => attempts).toBe(1)
-  await page.clock.runFor(15_000)
-  await expect.poll(() => attempts).toBe(4)
-  await expect(page.getByText('That did not go through')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
-  await page.clock.runFor(10_000)
-  expect(attempts).toBe(4)
-  await page.getByRole('button', { name: 'Send' }).click()
-  await expect.poll(() => attempts).toBe(5)
-})

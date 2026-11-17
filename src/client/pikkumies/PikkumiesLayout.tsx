@@ -7,7 +7,6 @@ import { ToastViewport, toastManager } from '../components/Toast'
 import { getEffectiveModifier, matchesModifier } from '../utils/device'
 import { useSettingsStore } from '../stores/settingsStore'
 import { currentLaunch } from './bootstrap'
-import { PENDING_ASK_KEY, readPendingAsks, removePendingAsk, type PendingAsk } from './pendingAsk'
 
 type EternalState = 'running' | 'starting' | 'waiting-for-setup' | 'not-ready' | 'quit'
 type Eternal = { id: string; state: EternalState; why?: string }
@@ -36,7 +35,6 @@ export default function PikkumiesLayout(props: Props) {
   const [targetId, setTargetId] = useState(() => {
     const id = new URLSearchParams(window.location.search).get('session')
     if (id && ID.test(id)) return id
-    if (readPendingAsks(localStorage.getItem(PENDING_ASK_KEY)).length) return 'pm1'
     const last = localStorage.getItem(LAST_TAB_KEY)
     return last && ID.test(last) ? last : 'pm1'
   })
@@ -44,9 +42,6 @@ export default function PikkumiesLayout(props: Props) {
   const [notice, setNotice] = useState('')
   const [pollError, setPollError] = useState('')
   const shortcutModifier = useSettingsStore((state) => state.shortcutModifier)
-  const [pending, setPending] = useState<PendingAsk[]>(() => readPendingAsks(localStorage.getItem(PENDING_ASK_KEY)))
-  const [sendTick, setSendTick] = useState(0)
-  const [sending, setSending] = useState(false)
   const [now, setNow] = useState(Date.now())
   const stateSince = useRef(new Map<string, { state: EternalState; since: number }>())
   const previousFocus = useRef<HTMLElement | null>(null)
@@ -91,17 +86,6 @@ export default function PikkumiesLayout(props: Props) {
   }, [selected, props.selectedSessionId, props.selectSession])
 
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== PENDING_ASK_KEY) return
-      const next = readPendingAsks(event.newValue)
-      setPending(next)
-      if (next.length) { setTargetId('pm1'); setSendTick((tick) => tick + 1) }
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
-
-  useEffect(() => {
     localStorage.setItem(LAST_TAB_KEY, targetId)
     tabRefs.current.get(targetId)?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
   }, [targetId])
@@ -127,49 +111,6 @@ export default function PikkumiesLayout(props: Props) {
     window.addEventListener('focus', focus)
     return () => window.removeEventListener('focus', focus)
   }, [closingId])
-
-  useEffect(() => {
-    const ask = pending[0]
-    if (!ask) return
-    let cancelled = false
-    let timer: number | undefined
-    let exitFiveRetries = 0
-    async function deliver() {
-      if (cancelled) return
-      setSending(true)
-      setNotice('')
-      try {
-        const response = await fetch('/api/ask', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: ask.text, nonce: ask.nonce }),
-        })
-        const result = await response.json() as { accepted?: boolean; code?: number }
-        if (cancelled) return
-        if (result.accepted) {
-          setPending(removePendingAsk(ask.nonce))
-          setSending(false)
-          setNotice('')
-          return
-        }
-        if (result.code === 5 && ++exitFiveRetries > 3) {
-          setSending(false)
-          setNotice('That did not go through')
-          return
-        }
-        if (result.code === 2 || result.code === 5 || result.code === 6) {
-          setNotice(result.code === 2 ? 'Your question will be sent when setup is done.' : '')
-          timer = window.setTimeout(() => { void deliver() }, 5000)
-          return
-        }
-        setSending(false)
-        setNotice(result.code === 3 ? 'Pikkumies needs you in its window first.' :
-          result.code === 4 ? 'You are sending messages quickly. Try again in a minute.' :
-          'That did not go through. Try again.')
-      } catch { if (!cancelled) { setSending(false); setNotice('That did not go through. Try again.') } }
-    }
-    void deliver()
-    return () => { cancelled = true; if (timer) window.clearTimeout(timer); setSending(false) }
-  }, [pending, sendTick])
 
   async function create() {
     const response = await fetch('/api/eternals', { method: 'POST' })
@@ -254,10 +195,8 @@ export default function PikkumiesLayout(props: Props) {
     </div>
     {active?.state === 'waiting-for-setup' && <div className="bg-amber-950 px-3 py-2 text-sm text-amber-200">Pikkumies needs you to finish setup in the window below.</div>}
     {pollError && <div role="status" className="bg-amber-950 px-3 py-2 text-sm text-amber-200">{pollError}</div>}
-    <div aria-live="polite" className={notice || pending.length ? 'bg-amber-950 px-3 py-2 text-sm text-amber-200' : 'sr-only'}>
-      {pending.length > 0 && <span>Not sent yet: {pending[0]!.text.slice(0, 60)}. </span>}
-      {sending && <span>Sending your message… </span>}{notice}
-      {pending.length > 0 && !sending && <button className="ml-2 rounded px-2 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#4fc3f7]" onClick={() => setSendTick((tick) => tick + 1)}>Send</button>}
+    <div aria-live="polite" className={notice ? 'bg-amber-950 px-3 py-2 text-sm text-amber-200' : 'sr-only'}>
+      {notice}
     </div>
     <div id="pikkumies-panel" role="tabpanel" aria-label={targetId === 'pm1' ? 'Primary' : `Pikkumies ${targetId.slice(2)}`} className="flex min-h-0 flex-1 flex-col">
     {!selected && active?.state === 'not-ready' ? <div role="status" data-testid="pikkumies-not-ready" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-amber-200">

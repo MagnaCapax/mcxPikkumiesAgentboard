@@ -30,7 +30,7 @@ const expectedRoutes: Record<string, string[]> = {
   ],
   'src/server/routes/pasteFile.ts': ["POST '/'"],
   'src/server/pikkumies/routes.ts': [
-    "GET '/eternals'", "POST '/ask'", "POST '/eternals'", "POST '/eternals/:id/quit'",
+    "GET '/eternals'", "POST '/eternals'", "POST '/eternals/:id/quit'",
   ],
 }
 
