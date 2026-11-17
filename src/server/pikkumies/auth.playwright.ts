@@ -36,7 +36,7 @@ test('fragment exchange and guarded simplified interface', async ({ page, reques
   expect((await request.get(`${base}/fonts/jetbrains-mono-latin-wght-normal.woff2`)).status()).toBe(200)
   const asset = await page.locator('script[src*="/assets/"]').getAttribute('src')
   expect(asset).toBeTruthy()
-  const compressed = await request.get(`${base}${asset}`, { headers: { 'Accept-Encoding': 'gzip' } })
+  const compressed = await request.get(new URL(asset!, `${base}/`).href, { headers: { 'Accept-Encoding': 'gzip' } })
   expect(compressed.headers()['cache-control']).toContain('immutable')
   expect(compressed.headers()['content-encoding']).toBe('gzip')
   expect((await request.get(`${base}/api/session-media/id`)).status()).toBe(404)
